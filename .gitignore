@@ -1,0 +1,36 @@
+# Build outputs
+/build/
+/cmake-build-*/
+/output/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.obj
+*.dll
+*.dylib
+
+# IDE and system files
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
+
+# Large media samples
+/media/*.mp4
+/media/*.avi
+/media/*.mkv
+
+# Bundled third-party SDKs and prebuilt libraries
+/3rdparty/opencv/
+/mpp_libs/*.so
+/mpp_libs/*.a
+/librknn_api/armhf/*.so
+/librknn_api/aarch64/*.so
+/3rdparty/rga/**/lib/
+
+# Runtime artifacts
+*.log
+core
+core.*
