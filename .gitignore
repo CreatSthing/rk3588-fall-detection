@@ -1,5 +1,6 @@
 # Build outputs
 /build/
+/build-pc/
 /cmake-build-*/
 /output/
 CMakeCache.txt
@@ -18,9 +19,10 @@ Makefile
 Thumbs.db
 
 # Large media samples
-/media/*.mp4
-/media/*.avi
-/media/*.mkv
+/assets/media/*.mp4
+/assets/media/*.avi
+/assets/media/*.mkv
+*.onnx
 
 # Bundled third-party SDKs and prebuilt libraries
 /3rdparty/opencv/

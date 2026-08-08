@@ -10,6 +10,32 @@ message(STATUS "System: ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_VERSION}")
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(BUILD_RK3588_TARGETS "Build RKNN/MPP targets for RK3588" ON)
+option(BUILD_PC_YOLO_DEMO "Build the OpenCV-DNN PC test program" OFF)
+
+find_package(OpenCV REQUIRED)
+
+set(PROJECT_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+set(PC_YOLO_SOURCES
+    src/pc/pc_yolov5.cpp
+    apps/pc_yolov5/main.cpp
+    src/draw/cv_draw.cpp
+)
+
+if(BUILD_PC_YOLO_DEMO)
+    add_executable(pc_yolov5 ${PC_YOLO_SOURCES})
+    target_include_directories(pc_yolov5 PRIVATE
+        ${OpenCV_INCLUDE_DIRS}
+        ${PROJECT_SRC_DIR}
+    )
+    target_link_libraries(pc_yolov5 ${OpenCV_LIBS})
+endif()
+
+if(NOT BUILD_RK3588_TARGETS)
+    return()
+endif()
+
 # 设置库架构
 set(LIB_ARCH "aarch64")
 set(DEVICE_NAME "RK3588")
@@ -30,16 +56,13 @@ set(3RDPARTY_PATH ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty)
 set(RGA_DIR ${3RDPARTY_PATH}/rga/${DEVICE_NAME})
 set(RGA_LIB ${RGA_DIR}/lib/Linux/${LIB_ARCH}/librga.so)
 # set(OpenCV_DIR ${3RDPARTY_PATH}/opencv/opencv-linux-${LIB_ARCH}/share/OpenCV)
-find_package(OpenCV REQUIRED)
 # 输出OpenCV信息
 message(STATUS "include path: ${OpenCV_INCLUDE_DIRS}")
 
-
-# 用来搜索头文件的目录
-include_directories(
+set(RK3588_COMMON_INCLUDE_DIRS
     ${OpenCV_INCLUDE_DIRS}
     ${RKNN_API_INCLUDE_PATH}
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${PROJECT_SRC_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/submodules/ZLMediaKit/api/include
     ${RGA_DIR}/include
     ${CMAKE_CURRENT_LIST_DIR}/submodules/mpp/inc
@@ -49,11 +72,34 @@ include_directories(
     ${CMAKE_CURRENT_LIST_DIR}/submodules/mpp/mpp/base/inc
 )
 
-# 构建预处理和后处理库
-add_library(nn_process SHARED
-            src/process/preprocess.cpp
-            src/process/yolov5_postprocess.cpp
+set(NN_PROCESS_SOURCES
+    src/process/preprocess.cpp
+    src/process/yolov5_postprocess.cpp
 )
+
+set(STREAM_MEDIA_SOURCES
+    src/media/media_buffer.cpp
+    src/media/mpi_enc.cpp
+    src/media/mpi_dec.cpp
+    src/media/ffmpeg_source.cpp
+    src/media/zlmedia_worker.cpp
+)
+
+set(STREAM_PLATFORM_LIBS
+    rockchip_mpp # 在mpp_libs下，包含了所有的mpp库
+    utils # 在mpp_libs下，MPP工具库
+    mk_api # 在mpp_libs下，ZLMediaKit API库
+    avformat
+    avcodec
+    avutil
+)
+
+
+# 用来搜索头文件的目录
+include_directories(${RK3588_COMMON_INCLUDE_DIRS})
+
+# 构建预处理和后处理库
+add_library(nn_process SHARED ${NN_PROCESS_SOURCES})
 # 链接库
 target_link_libraries(nn_process
     ${OpenCV_LIBS}
@@ -67,7 +113,7 @@ target_link_libraries(rknn_engine
     ${RKNN_API_LIB_PATH}
 )
 # yolov5_lib
-add_library(yolov5_lib SHARED src/task/yolov5.cpp)
+add_library(yolov5_lib SHARED src/yolov5/yolov5.cpp)
 # 链接库
 target_link_libraries(yolov5_lib
     rknn_engine
@@ -82,7 +128,7 @@ target_link_libraries(draw_lib
 )
 
 # 测试自yolov5
-add_executable(yolov5_img src/yolov5_img.cpp)
+add_executable(yolov5_img apps/image_demo/main.cpp)
 
 # 链接库
 target_link_libraries(yolov5_img
@@ -91,7 +137,7 @@ target_link_libraries(yolov5_img
 )
 
 # 测试自yolov5 video
-add_executable(yolov5_video src/yolov5_video.cpp)
+add_executable(yolov5_video apps/video_demo/main.cpp)
 
 # 链接库
 target_link_libraries(yolov5_video
@@ -101,8 +147,8 @@ target_link_libraries(yolov5_video
 
 # 测试自yolov5 thread pool
 add_executable(yolov5_thread_pool 
-    src/yolov5_thread_pool.cpp
-    src/task/yolov5_thread_pool.cpp
+    apps/thread_pool_demo/main.cpp
+    src/yolov5/yolov5_thread_pool.cpp
     )
 
 # 链接库
@@ -113,21 +159,12 @@ target_link_libraries(yolov5_thread_pool
 
 # 测试yolov5_stream
 add_executable(yolov5_stream
-        src/yolov5_stream.cpp
-        src/media/media_buffer.cpp
-        src/media/mpi_enc.cpp
-        src/media/mpi_dec.cpp
-        src/media/ffmpeg_source.cpp
-        src/media/zlmedia_worker.cpp
+        apps/stream_demo/main.cpp
+        ${STREAM_MEDIA_SOURCES}
 )
 
 target_link_libraries(yolov5_stream
-        rockchip_mpp # 在mpp_libs下，包含了所有的mpp库
-        utils # 在mpp_libs下，MPP工具库
-        mk_api # 在mpp_libs下，ZLMediaKit API库
-        avformat
-        avcodec
-        avutil
+        ${STREAM_PLATFORM_LIBS}
         draw_lib
         yolov5_lib
 )
@@ -135,22 +172,14 @@ target_link_libraries(yolov5_stream
 
 # 测试yolov5_stream_pool
 add_executable(yolov5_stream_pool
-        src/yolov5_stream_pool.cpp
-        src/task/yolov5_thread_pool.cpp
-        src/media/media_buffer.cpp
-        src/media/mpi_enc.cpp
-        src/media/mpi_dec.cpp
-        src/media/ffmpeg_source.cpp
-        src/media/zlmedia_worker.cpp
+        apps/stream_pipeline/main.cpp
+        src/pipeline/video_analytics_pipeline.cpp
+        src/yolov5/yolov5_thread_pool.cpp
+        ${STREAM_MEDIA_SOURCES}
 )
 
 target_link_libraries(yolov5_stream_pool
-        rockchip_mpp # 在mpp_libs下，包含了所有的mpp库
-        utils # 在mpp_libs下，MPP工具库
-        mk_api # 在mpp_libs下，ZLMediaKit API库
-        avformat
-        avcodec
-        avutil
+        ${STREAM_PLATFORM_LIBS}
         draw_lib
         yolov5_lib
 )

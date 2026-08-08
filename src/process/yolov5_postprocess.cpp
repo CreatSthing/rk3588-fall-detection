@@ -26,7 +26,7 @@
 namespace yolov5
 {
 
-#define LABEL_NALE_TXT_PATH "./model/coco_80_labels_list.txt"
+#define LABEL_NALE_TXT_PATH "./assets/labels/coco_80_labels_list.txt"
 
     static const char *labels[OBJ_CLASS_NUM] = {
         "person", "bicycle", "car", "motorbike ", "aeroplane ", "bus ", "train", "truck ", "boat", "traffic light",

@@ -1,7 +1,7 @@
 
 #include <opencv2/opencv.hpp>
 
-#include "task/yolov5.h"
+#include "yolov5/yolov5.h"
 #include "utils/logging.h"
 #include "draw/cv_draw.h"
 

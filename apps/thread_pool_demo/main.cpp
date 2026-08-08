@@ -1,11 +1,11 @@
 
 #include <opencv2/opencv.hpp>
 
-#include "task/yolov5.h"
+#include "yolov5/yolov5.h"
 #include "utils/logging.h"
 #include "draw/cv_draw.h"
 
-#include "task/yolov5_thread_pool.h"
+#include "yolov5/yolov5_thread_pool.h"
 
 static int g_frame_start_id = 0; // 读取视频帧的索引
 static int g_frame_end_id = 0;   // 模型处理完的索引
@@ -28,8 +28,13 @@ void get_results(int width = 1280, int height = 720, int fps = 30)
     {
 
         // 结果
-        cv::Mat img;
-        auto ret = g_pool->getTargetImgResult(img, g_frame_end_id++);
+        InferenceResult result;
+        auto ret = g_pool->getResult(result, g_frame_end_id++);
+        cv::Mat img = result.frame;
+        if (ret == NN_SUCCESS)
+        {
+            DrawDetections(img, result.detections);
+        }
         // 如果读取完毕，且模型处理完毕，结束
         if (end && ret != NN_SUCCESS)
         {
