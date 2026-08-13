@@ -13,7 +13,8 @@
 class RKEngine : public NNEngine
 {
 public:
-    RKEngine() : rknn_ctx_(0), ctx_created_(false), input_num_(0), output_num_(0){}; // 构造函数，初始化
+    RKEngine() : rknn_ctx_(0), ctx_created_(false), collect_perf_(false),
+                 perf_reported_(false), input_num_(0), output_num_(0){}; // 构造函数，初始化
     ~RKEngine() override;                                                            // 析构函数
 
     nn_error_e LoadModelFile(const char *model_file) override;                                                         // 加载模型文件
@@ -25,6 +26,8 @@ private:
     // rknn context
     rknn_context rknn_ctx_; // rknn context
     bool ctx_created_;      // rknn context是否创建
+    bool collect_perf_;     // 是否启用 RKNN 逐层性能采集
+    bool perf_reported_;    // 每个 context 只输出一次详细报告
 
     uint32_t input_num_;  // 输入的数量
     uint32_t output_num_; // 输出的数量

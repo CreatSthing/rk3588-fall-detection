@@ -1,6 +1,7 @@
 # Build outputs
 /build/
 /build-pc/
+/build-rk3588-vm/
 /cmake-build-*/
 /output/
 CMakeCache.txt
@@ -11,10 +12,13 @@ Makefile
 *.obj
 *.dll
 *.dylib
+__pycache__/
+*.pyc
 
 # IDE and system files
 /.vscode/
 /.idea/
+/.agent-keys/
 .DS_Store
 Thumbs.db
 
@@ -22,12 +26,18 @@ Thumbs.db
 /assets/media/*.mp4
 /assets/media/*.avi
 /assets/media/*.mkv
+/assets/weights/*.rknn
+/assets/calibration/
+/assets/models/
 *.onnx
 
 # Bundled third-party SDKs and prebuilt libraries
 /3rdparty/opencv/
+/3rdparty/ffmpeg/
+/3rdparty/ffmpeg/**/lib/
 /mpp_libs/*.so
 /mpp_libs/*.a
+/mpp_libs/
 /librknn_api/armhf/*.so
 /librknn_api/aarch64/*.so
 /3rdparty/rga/**/lib/

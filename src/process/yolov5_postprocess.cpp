@@ -127,15 +127,15 @@ namespace yolov5
     {
         for (int i = 0; i < validCount; ++i)
         {
-            if (order[i] == -1 || classIds[i] != filterId)
+            int n = order[i];
+            if (n == -1 || classIds[n] != filterId)
             {
                 continue;
             }
-            int n = order[i];
             for (int j = i + 1; j < validCount; ++j)
             {
                 int m = order[j];
-                if (m == -1 || classIds[i] != filterId)
+                if (m == -1 || classIds[m] != filterId)
                 {
                     continue;
                 }
@@ -211,6 +211,120 @@ namespace yolov5
     }
 
     static float deqnt_affine_to_f32(int8_t qnt, int32_t zp, float scale) { return ((float)qnt - (float)zp) * scale; }
+
+    static float merged_output_value(const merged_output_t &output, int prediction, int attribute)
+    {
+        const int index = output.attribute_last
+                              ? prediction * output.attribute_count + attribute
+                              : attribute * output.prediction_count + prediction;
+        if (output.type == merged_output_type_t::FLOAT32)
+        {
+            return static_cast<const float *>(output.data)[index];
+        }
+        return deqnt_affine_to_f32(static_cast<const int8_t *>(output.data)[index],
+                                   output.zero_point, output.scale);
+    }
+
+    int post_process_merged(const merged_output_t &output, int model_in_h, int model_in_w,
+                            float conf_threshold, float nms_threshold, float scale_w, float scale_h,
+                            detect_result_group_t *group)
+    {
+        if (output.data == nullptr || group == nullptr || output.prediction_count <= 0 ||
+            output.attribute_count != PROP_BOX_SIZE || scale_w <= 0.0f || scale_h <= 0.0f)
+        {
+            return -1;
+        }
+
+        memset(group, 0, sizeof(detect_result_group_t));
+        std::vector<float> boxes;
+        std::vector<float> scores;
+        std::vector<int> class_ids;
+
+        for (int prediction = 0; prediction < output.prediction_count; ++prediction)
+        {
+            const float objectness = merged_output_value(output, prediction, 4);
+            if (objectness < conf_threshold)
+            {
+                continue;
+            }
+
+            int class_id = 0;
+            float class_score = merged_output_value(output, prediction, 5);
+            for (int attribute = 6; attribute < output.attribute_count; ++attribute)
+            {
+                const float candidate = merged_output_value(output, prediction, attribute);
+                if (candidate > class_score)
+                {
+                    class_score = candidate;
+                    class_id = attribute - 5;
+                }
+            }
+
+            const float confidence = objectness * class_score;
+            if (confidence < conf_threshold)
+            {
+                continue;
+            }
+
+            const float center_x = merged_output_value(output, prediction, 0);
+            const float center_y = merged_output_value(output, prediction, 1);
+            const float width = merged_output_value(output, prediction, 2);
+            const float height = merged_output_value(output, prediction, 3);
+            boxes.push_back(center_x - width * 0.5f);
+            boxes.push_back(center_y - height * 0.5f);
+            boxes.push_back(width);
+            boxes.push_back(height);
+            scores.push_back(confidence);
+            class_ids.push_back(class_id);
+        }
+
+        const int valid_count = static_cast<int>(scores.size());
+        if (valid_count == 0)
+        {
+            return 0;
+        }
+
+        std::vector<int> indices(valid_count);
+        for (int i = 0; i < valid_count; ++i)
+        {
+            indices[i] = i;
+        }
+        quick_sort_indice_inverse(scores, 0, valid_count - 1, indices);
+
+        std::set<int> classes(class_ids.begin(), class_ids.end());
+        for (int class_id : classes)
+        {
+            nms(valid_count, boxes, class_ids, indices, class_id, nms_threshold);
+        }
+
+        int result_count = 0;
+        for (int i = 0; i < valid_count && result_count < OBJ_NUMB_MAX_SIZE; ++i)
+        {
+            const int index = indices[i];
+            if (index < 0)
+            {
+                continue;
+            }
+
+            const float x1 = boxes[index * 4];
+            const float y1 = boxes[index * 4 + 1];
+            const float x2 = x1 + boxes[index * 4 + 2];
+            const float y2 = y1 + boxes[index * 4 + 3];
+            const int class_id = class_ids[index];
+            detect_result_t &result = group->results[result_count];
+            result.box.left = static_cast<int>(clamp(x1, 0, model_in_w) / scale_w);
+            result.box.top = static_cast<int>(clamp(y1, 0, model_in_h) / scale_h);
+            result.box.right = static_cast<int>(clamp(x2, 0, model_in_w) / scale_w);
+            result.box.bottom = static_cast<int>(clamp(y2, 0, model_in_h) / scale_h);
+            result.id = class_id;
+            result.prop = scores[index];
+            strncpy(result.name, labels[class_id], OBJ_NAME_MAX_SIZE - 1);
+            result.name[OBJ_NAME_MAX_SIZE - 1] = '\0';
+            ++result_count;
+        }
+        group->count = result_count;
+        return 0;
+    }
 
     static int process(int8_t *input, int *anchor, int grid_h, int grid_w, int height, int width, int stride,
                        std::vector<float> &boxes, std::vector<float> &objProbs, std::vector<int> &classId,

@@ -18,3 +18,10 @@
 ```
 
 同一天的一组紧密相关改动可以放在同一标题下，用编号列出。记录时优先表达：遇到了什么问题、如何分析、做了什么取舍、最终有什么结果。
+
+## SSH 连接记录
+
+- VMware Ubuntu root 私钥路径：`E:\deskTop\develop\项目\基于RK3588的智能摄像头\yolov5_stream\.agent-keys\rk3588_vm_root_ed25519`
+- 目标主机：`root@192.168.113.134`
+- 静态 IP 与 VMware 共享目录持久化配置见：`docs/vm-ubuntu-setup.md`
+- 注意：`.agent-keys/` 已加入 `.gitignore`，不要提交私钥内容。

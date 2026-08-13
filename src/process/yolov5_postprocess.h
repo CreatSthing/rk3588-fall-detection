@@ -13,6 +13,21 @@
 
 namespace yolov5 {
 
+    enum class merged_output_type_t {
+        INT8,
+        FLOAT32,
+    };
+
+    struct merged_output_t {
+        const void *data;
+        int prediction_count;
+        int attribute_count;
+        bool attribute_last;
+        merged_output_type_t type;
+        int32_t zero_point;
+        float scale;
+    };
+
     typedef struct _BOX_RECT {
         int left;
         int right;
@@ -37,6 +52,13 @@ namespace yolov5 {
                      float conf_threshold, float nms_threshold, float scale_w, float scale_h,
                      std::vector<int32_t> &qnt_zps, std::vector<float> &qnt_scales,
                      detect_result_group_t *group);
+
+    // Decode a model output that already contains YOLOv5 xywh boxes and class
+    // probabilities, for example [1, 25200, 85]. The original three-head
+    // decoder above remains available for models exported without Detect decode.
+    int post_process_merged(const merged_output_t &output, int model_in_h, int model_in_w,
+                            float conf_threshold, float nms_threshold, float scale_w, float scale_h,
+                            detect_result_group_t *group);
 
     void deinitPostProcess();
 }

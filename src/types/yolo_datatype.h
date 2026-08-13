@@ -3,7 +3,7 @@
 #ifndef RK3588_DEMO_NN_DATATYPE_H
 #define RK3588_DEMO_NN_DATATYPE_H
 
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
 
 typedef struct _nn_object_s {
     float x;

@@ -2,6 +2,10 @@
 #include "yolov5.h"
 
 #include <memory>
+#include <algorithm>
+#include <cmath>
+#include <chrono>
+#include <cstring>
 
 #include "utils/logging.h"
 #include "process/preprocess.h"
@@ -25,7 +29,7 @@ void DetectionGrp2DetectionArray(yolov5::detect_result_group_t &det_grp, std::ve
                            det_grp.results[i].box.bottom - det_grp.results[i].box.top);
 
         det.confidence = det_grp.results[i].prop;
-        det.class_id = 0;
+        det.class_id = det_grp.results[i].id;
         // generate random cv::Scalar color
         // det.color = cv::Scalar(rand() % 255, rand() % 255, rand() % 255);
         // green
@@ -87,13 +91,15 @@ nn_error_e Yolov5::LoadModel(const char *model_path)
         {
             tensor.attr.dims[j] = output_shapes[i].dims[j];
         }
-        // output tensor needs to be float32
-        if (output_shapes[i].type != NN_TENSOR_INT8)
+        if (output_shapes[i].type != NN_TENSOR_INT8 && output_shapes[i].type != NN_TENSOR_FLOAT)
         {
-            NN_LOG_ERROR("yolo output tensor type is not int8, but %d", output_shapes[i].type);
+            NN_LOG_ERROR("unsupported yolo output tensor type: %d", output_shapes[i].type);
             return NN_RKNN_OUTPUT_ATTR_ERROR;
         }
         tensor.attr.type = output_shapes[i].type;
+        tensor.attr.layout = output_shapes[i].layout;
+        tensor.attr.zp = output_shapes[i].zp;
+        tensor.attr.scale = output_shapes[i].scale;
         tensor.attr.index = i;
         tensor.attr.size = output_shapes[i].n_elems * nn_tensor_type_to_size(tensor.attr.type);
         tensor.data = malloc(tensor.attr.size);
@@ -118,8 +124,9 @@ nn_error_e Yolov5::Preprocess(const cv::Mat &img, const std::string process_type
 
     if (process_type == "opencv")
     {
-        // BGR2RGB，resize，再放入input_tensor_中
-        letterbox_info_ = letterbox(img, image_letterbox, wh_ratio);
+        // 直接缩放到模型尺寸内并补边，避免创建原图尺寸的方形中间缓冲。
+        letterbox_info_ = letterbox_resize(img, image_letterbox,
+                                           input_tensor_.attr.dims[2], input_tensor_.attr.dims[1]);
         cvimg2tensor(image_letterbox, input_tensor_.attr.dims[2], input_tensor_.attr.dims[1], input_tensor_);
     }
     else if (process_type == "rga")
@@ -142,36 +149,112 @@ nn_error_e Yolov5::Inference()
     // 将input_tensor_放入inputs中
     inputs.push_back(input_tensor_);
     // 运行模型
-    engine_->Run(inputs, output_tensors_, false);
-    return NN_SUCCESS;
+    return engine_->Run(inputs, output_tensors_, false);
 }
 
 // 运行模型
-nn_error_e Yolov5::Run(const cv::Mat &img, std::vector<Detection> &objects)
+nn_error_e Yolov5::Run(const cv::Mat &img, std::vector<Detection> &objects,
+                       InferenceProfile *profile)
 {
     // letterbox后的图像
     cv::Mat image_letterbox;
     // 预处理，支持opencv或rga
-    Preprocess(img, "opencv", image_letterbox);
+    const auto preprocess_start = std::chrono::steady_clock::now();
+    nn_error_e ret = Preprocess(img, "opencv", image_letterbox);
+    const auto preprocess_end = std::chrono::steady_clock::now();
+    if (ret != NN_SUCCESS)
+    {
+        return ret;
+    }
     // Preprocess(img, "rga", image_letterbox);
     // 推理
-    Inference();
-    // 后处理
-    Postprocess(image_letterbox, objects);
-    return NN_SUCCESS;
+    const auto npu_start = std::chrono::steady_clock::now();
+    ret = Inference();
+    const auto npu_end = std::chrono::steady_clock::now();
+    if (ret != NN_SUCCESS)
+    {
+        return ret;
+    }
+    const auto postprocess_start = std::chrono::steady_clock::now();
+    ret = Postprocess(image_letterbox, objects);
+    const auto postprocess_end = std::chrono::steady_clock::now();
+    if (profile != nullptr)
+    {
+        profile->preprocess_ms = std::chrono::duration<double, std::milli>(
+            preprocess_end - preprocess_start).count();
+        profile->npu_ms = std::chrono::duration<double, std::milli>(
+            npu_end - npu_start).count();
+        profile->postprocess_ms = std::chrono::duration<double, std::milli>(
+            postprocess_end - postprocess_start).count();
+    }
+    return ret;
 }
-void letterbox_decode(std::vector<Detection> &objects, bool hor, int pad)
+
+nn_error_e Yolov5::RunPreparedRgb(const cv::Mat &model_rgb,
+                                  const LetterBoxInfo &letterbox_info,
+                                  std::vector<Detection> &objects,
+                                  InferenceProfile *profile)
+{
+    const auto preprocess_start = std::chrono::steady_clock::now();
+    const int input_height = static_cast<int>(input_tensor_.attr.dims[1]);
+    const int input_width = static_cast<int>(input_tensor_.attr.dims[2]);
+    if (model_rgb.empty() || model_rgb.channels() != 3 ||
+        model_rgb.cols != input_width || model_rgb.rows != input_height)
+    {
+        NN_LOG_ERROR("prepared RGB input must be %dx%d RGB888", input_width, input_height);
+        return NN_RKNN_INPUT_ATTR_ERROR;
+    }
+    const size_t row_bytes = static_cast<size_t>(input_width) * 3;
+    if (model_rgb.isContinuous())
+    {
+        std::memcpy(input_tensor_.data, model_rgb.data, input_tensor_.attr.size);
+    }
+    else
+    {
+        uint8_t *dst = static_cast<uint8_t *>(input_tensor_.data);
+        for (int y = 0; y < input_height; ++y)
+        {
+            std::memcpy(dst + y * row_bytes, model_rgb.ptr(y), row_bytes);
+        }
+    }
+    letterbox_info_ = letterbox_info;
+    const auto preprocess_end = std::chrono::steady_clock::now();
+
+    const auto npu_start = std::chrono::steady_clock::now();
+    nn_error_e ret = Inference();
+    const auto npu_end = std::chrono::steady_clock::now();
+    if (ret != NN_SUCCESS)
+    {
+        return ret;
+    }
+    const auto postprocess_start = std::chrono::steady_clock::now();
+    ret = Postprocess(model_rgb, objects);
+    const auto postprocess_end = std::chrono::steady_clock::now();
+    if (profile != nullptr)
+    {
+        profile->preprocess_ms = std::chrono::duration<double, std::milli>(
+            preprocess_end - preprocess_start).count();
+        profile->npu_ms = std::chrono::duration<double, std::milli>(
+            npu_end - npu_start).count();
+        profile->postprocess_ms = std::chrono::duration<double, std::milli>(
+            postprocess_end - postprocess_start).count();
+    }
+    return ret;
+}
+
+void letterbox_decode(std::vector<Detection> &objects, const LetterBoxInfo &info)
 {
     for (auto &obj : objects)
     {
-        if (hor)
-        {
-            obj.box.x -= pad;
-        }
-        else
-        {
-            obj.box.y -= pad;
-        }
+        const float left = (obj.box.x - info.pad_x) / info.scale;
+        const float top = (obj.box.y - info.pad_y) / info.scale;
+        const float right = (obj.box.x + obj.box.width - info.pad_x) / info.scale;
+        const float bottom = (obj.box.y + obj.box.height - info.pad_y) / info.scale;
+        const int x1 = std::max(0, std::min(info.original_width, static_cast<int>(std::round(left))));
+        const int y1 = std::max(0, std::min(info.original_height, static_cast<int>(std::round(top))));
+        const int x2 = std::max(0, std::min(info.original_width, static_cast<int>(std::round(right))));
+        const int y2 = std::max(0, std::min(info.original_height, static_cast<int>(std::round(bottom))));
+        obj.box = cv::Rect(x1, y1, std::max(0, x2 - x1), std::max(0, y2 - y1));
     }
 }
 // 后处理
@@ -183,18 +266,125 @@ nn_error_e Yolov5::Postprocess(const cv::Mat &img, std::vector<Detection> &objec
     float scale_h = width * 1.f / img.rows;
 
     yolov5::detect_result_group_t detections;
+    int ret = -1;
 
-    yolov5::post_process((int8_t *)output_tensors_[0].data,
-                         (int8_t *)output_tensors_[1].data,
-                         (int8_t *)output_tensors_[2].data,
-                         height, width,
-                         BOX_THRESH, NMS_THRESH,
-                         scale_w, scale_h,
-                         out_zps_, out_scales_,
-                         &detections);
+    if (output_tensors_.size() == 1)
+    {
+        const tensor_data_s &tensor = output_tensors_[0];
+        const int attributes = PROP_BOX_SIZE;
+        bool attribute_last = false;
+        bool shape_supported = false;
+        if (tensor.attr.n_dims >= 2 && tensor.attr.dims[tensor.attr.n_dims - 1] == attributes)
+        {
+            attribute_last = true;
+            shape_supported = true;
+        }
+        else
+        {
+            for (uint32_t i = 0; i < tensor.attr.n_dims; ++i)
+            {
+                if (tensor.attr.dims[i] == static_cast<uint32_t>(attributes))
+                {
+                    shape_supported = true;
+                    break;
+                }
+            }
+        }
+
+        if (!shape_supported || tensor.attr.n_elems % attributes != 0)
+        {
+            NN_LOG_ERROR("unsupported merged yolo output shape");
+            return NN_RKNN_OUTPUT_ATTR_ERROR;
+        }
+
+        yolov5::merged_output_type_t output_type;
+        if (tensor.attr.type == NN_TENSOR_INT8)
+        {
+            output_type = yolov5::merged_output_type_t::INT8;
+        }
+        else if (tensor.attr.type == NN_TENSOR_FLOAT)
+        {
+            output_type = yolov5::merged_output_type_t::FLOAT32;
+        }
+        else
+        {
+            NN_LOG_ERROR("unsupported merged yolo output type: %d", tensor.attr.type);
+            return NN_RKNN_OUTPUT_ATTR_ERROR;
+        }
+
+        yolov5::merged_output_t output = {
+            tensor.data,
+            static_cast<int>(tensor.attr.n_elems / attributes),
+            attributes,
+            attribute_last,
+            output_type,
+            tensor.attr.zp,
+            tensor.attr.scale,
+        };
+        ret = yolov5::post_process_merged(output, height, width,
+                                          BOX_THRESH, NMS_THRESH,
+                                          scale_w, scale_h, &detections);
+    }
+    else if (output_tensors_.size() == 3)
+    {
+        const tensor_data_s *heads[3] = {nullptr, nullptr, nullptr};
+        std::vector<int32_t> head_zps(3);
+        std::vector<float> head_scales(3);
+        for (const tensor_data_s &tensor : output_tensors_)
+        {
+            if (tensor.attr.type != NN_TENSOR_INT8)
+            {
+                NN_LOG_ERROR("three-head yolo output must be int8");
+                return NN_RKNN_OUTPUT_ATTR_ERROR;
+            }
+            int head_index = -1;
+            for (int i = 0; i < 3; ++i)
+            {
+                const int stride = 8 << i;
+                const int expected = PROP_BOX_SIZE * 3 * (height / stride) * (width / stride);
+                if (tensor.attr.n_elems == static_cast<uint32_t>(expected))
+                {
+                    head_index = i;
+                    break;
+                }
+            }
+            if (head_index < 0 || heads[head_index] != nullptr)
+            {
+                NN_LOG_ERROR("invalid or duplicate raw yolo head: %u elements", tensor.attr.n_elems);
+                return NN_RKNN_OUTPUT_ATTR_ERROR;
+            }
+            heads[head_index] = &tensor;
+            head_zps[head_index] = tensor.attr.zp;
+            head_scales[head_index] = tensor.attr.scale;
+        }
+        if (heads[0] == nullptr || heads[1] == nullptr || heads[2] == nullptr)
+        {
+            NN_LOG_ERROR("raw yolo heads P3/P4/P5 are incomplete");
+            return NN_RKNN_OUTPUT_ATTR_ERROR;
+        }
+        ret = yolov5::post_process((int8_t *)heads[0]->data,
+                                   (int8_t *)heads[1]->data,
+                                   (int8_t *)heads[2]->data,
+                                   height, width,
+                                   BOX_THRESH, NMS_THRESH,
+                                   scale_w, scale_h,
+                                   head_zps, head_scales,
+                                   &detections);
+    }
+    else
+    {
+        NN_LOG_ERROR("unsupported yolo output count: %ld", output_tensors_.size());
+        return NN_RKNN_OUTPUT_ATTR_ERROR;
+    }
+
+    if (ret != 0)
+    {
+        NN_LOG_ERROR("yolo postprocess failed: %d", ret);
+        return NN_RKNN_OUTPUT_ATTR_ERROR;
+    }
 
     DetectionGrp2DetectionArray(detections, objects);
-    letterbox_decode(objects, letterbox_info_.hor, letterbox_info_.pad);
+    letterbox_decode(objects, letterbox_info_);
 
     return NN_SUCCESS;
 }

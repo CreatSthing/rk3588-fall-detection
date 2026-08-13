@@ -3,6 +3,7 @@
 #include "rknn_engine.h"
 
 #include <string.h>
+#include <cstdlib>
 
 #include "utils/engine_helper.h"
 #include "utils/logging.h"
@@ -23,7 +24,12 @@ nn_error_e RKEngine::LoadModelFile(const char *model_file)
         NN_LOG_ERROR("load model file %s fail!", model_file);
         return NN_LOAD_MODEL_FAIL; // 返回错误码：加载模型文件失败
     }
-    int ret = rknn_init(&rknn_ctx_, model, model_len, 0, NULL); // 初始化rknn context
+    const char *perf_env = std::getenv("RKNN_PERF");
+    collect_perf_ = perf_env != nullptr && strcmp(perf_env, "0") != 0;
+    const uint32_t init_flags = collect_perf_ ? RKNN_FLAG_COLLECT_PERF_MASK : 0;
+    int ret = rknn_init(&rknn_ctx_, model, model_len, init_flags, NULL); // 初始化rknn context
+    free(model);
+    model = nullptr;
     if (ret < 0)
     {
         NN_LOG_ERROR("rknn_init fail! ret=%d", ret);
@@ -58,6 +64,12 @@ nn_error_e RKEngine::LoadModelFile(const char *model_file)
     // 保存输入输出个数
     input_num_ = io_num.n_input;
     output_num_ = io_num.n_output;
+    if (input_num_ <= 0 || output_num_ <= 0 || input_num_ > g_max_io_num || output_num_ > g_max_io_num)
+    {
+        NN_LOG_ERROR("unsupported model I/O count: inputs=%d, outputs=%d, max=%d",
+                     input_num_, output_num_, g_max_io_num);
+        return NN_IO_NUM_NOT_MATCH;
+    }
 
     // 输入属性
     NN_LOG_INFO("input tensors:");
@@ -153,6 +165,35 @@ nn_error_e RKEngine::Run(std::vector<tensor_data_s> &inputs, std::vector<tensor_
         NN_LOG_ERROR("rknn_run fail! ret=%d", ret);
         return NN_RKNN_RUNTIME_ERROR;
     }
+    if (collect_perf_ && !perf_reported_)
+    {
+        rknn_perf_run perf_run;
+        memset(&perf_run, 0, sizeof(perf_run));
+        int perf_ret = rknn_query(rknn_ctx_, RKNN_QUERY_PERF_RUN,
+                                  &perf_run, sizeof(perf_run));
+        if (perf_ret == RKNN_SUCC)
+        {
+            NN_LOG_INFO("RKNN_PERF_RUN duration_us=%lld",
+                        static_cast<long long>(perf_run.run_duration));
+        }
+        const char *detail_env = std::getenv("RKNN_PERF_DETAIL");
+        if (detail_env != nullptr && strcmp(detail_env, "0") != 0)
+        {
+            rknn_perf_detail detail;
+            memset(&detail, 0, sizeof(detail));
+            perf_ret = rknn_query(rknn_ctx_, RKNN_QUERY_PERF_DETAIL,
+                                  &detail, sizeof(detail));
+            if (perf_ret == RKNN_SUCC && detail.perf_data != nullptr)
+            {
+                NN_LOG_INFO("RKNN_PERF_DETAIL_BEGIN");
+                fwrite(detail.perf_data, 1, detail.data_len, stdout);
+                if (detail.data_len == 0 || detail.perf_data[detail.data_len - 1] != '\n')
+                    fputc('\n', stdout);
+                NN_LOG_INFO("RKNN_PERF_DETAIL_END");
+            }
+        }
+        perf_reported_ = true;
+    }
 
     // 获得输出
     rknn_output rknn_outputs[g_max_io_num];
@@ -176,7 +217,12 @@ nn_error_e RKEngine::Run(std::vector<tensor_data_s> &inputs, std::vector<tensor_
         // 将rknn_output转换为自定义的tensor_data_s
         rknn_output_to_tensor_data(rknn_outputs[i], outputs[i]);
         NN_LOG_DEBUG("output[%d] size=%d", i, outputs[i].attr.size);
-        free(rknn_outputs[i].buf); // 释放缓存
+    }
+    ret = rknn_outputs_release(rknn_ctx_, output_num_, rknn_outputs);
+    if (ret < 0)
+    {
+        NN_LOG_ERROR("rknn_outputs_release fail! ret=%d", ret);
+        return NN_RKNN_OUTPUT_GET_FAIL;
     }
     return NN_SUCCESS;
 }
