@@ -206,7 +206,7 @@ def run(args: argparse.Namespace) -> int:
                 if args.max_frames and frame_id >= args.max_frames:
                     break
     finally:
-        capture.release()
+        capture.close()
         final_updates = clip_buffer.close()
         if final_updates:
             print(json.dumps({
