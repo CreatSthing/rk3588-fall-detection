@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from apps.fall_detection.heuristics import FallDetector, PoseDetection, SimplePoseTracker
-from apps.fall_detection.yolov8_pose_rknn import _normalize_keypoint_output
+from apps.fall_detection.yolov8_pose_rknn import YoloV8PoseRKNN, _normalize_keypoint_output
 
 
 def pose(box, hip_y, horizontal=False):
@@ -23,6 +23,18 @@ def pose(box, hip_y, horizontal=False):
 
 
 class FallDetectorTests(unittest.TestCase):
+    def test_pose_decoder_rejects_score_equal_to_threshold(self):
+        model = YoloV8PoseRKNN.__new__(YoloV8PoseRKNN)
+        model.input_size = 640
+        model.object_threshold = 0.5
+        model.nms_threshold = 0.4
+        heads = [np.zeros((1, 65, 1, 1), dtype=np.float32) for _ in range(3)]
+        keypoints = np.zeros((1, 17, 3, 3), dtype=np.float32)
+        boxes, scores, decoded_keypoints = model._decode([*heads, keypoints])
+        self.assertEqual(boxes.shape, (0, 4))
+        self.assertEqual(scores.shape, (0,))
+        self.assertEqual(decoded_keypoints.shape, (0, 17, 3))
+
     def test_confirms_rapid_fall_once(self):
         detector = FallDetector(confirm_seconds=0.5, descent_threshold=0.35, cooldown_seconds=10)
         event = None

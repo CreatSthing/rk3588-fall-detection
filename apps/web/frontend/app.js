@@ -54,6 +54,8 @@ createApp({
       temp: [],
     });
     const cameraFormCache = {};
+    const cameraDetectionCache = {};
+    const cameraPreviewCache = {};
 
     const totalRunning = computed(() => status.cameras.filter((camera) => camera.running).length);
     const totalStreaming = computed(() => status.cameras.filter((camera) => camera.streaming).length);
@@ -88,6 +90,8 @@ createApp({
       const cameras = Array.isArray(payload.cameras) ? payload.cameras : [payload].filter(Boolean);
       status.cameras = cameras.map((camera) => ({
         ...camera,
+        last_result: cameraDetectionCache[camera.id] || camera.last_result,
+        preview_url: cameraPreviewCache[camera.id] || "",
         form: formForCamera(camera.id),
         player_url_abs: normalizePlayerUrl(camera.player_url),
         rtsp_url_abs: camera.rtsp_url || `rtsp://${location.hostname}:8554/live/${camera.id}`,
@@ -100,7 +104,16 @@ createApp({
     function updateCameraDetection(cameraId, payload) {
       const camera = status.cameras.find((item) => item.id === cameraId);
       if (!camera) return;
-      camera.last_result = payload;
+      if (payload.preview_jpeg) {
+        const displayPayload = { ...payload };
+        delete displayPayload.preview_jpeg;
+        cameraDetectionCache[cameraId] = displayPayload;
+        cameraPreviewCache[cameraId] = `data:image/jpeg;base64,${payload.preview_jpeg}`;
+        camera.last_result = displayPayload;
+        camera.preview_url = cameraPreviewCache[cameraId];
+      } else if (!camera.preview_url) {
+        camera.last_result = payload;
+      }
       camera.fps = Number(payload.fps || camera.fps || 0).toFixed(2);
       camera.frames = payload.completed || payload.frame_id || camera.frames;
     }

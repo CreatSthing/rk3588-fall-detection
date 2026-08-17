@@ -205,7 +205,7 @@ def make_camera_config(request: CameraUpsertRequest) -> Dict[str, Any]:
             "-m",
             "apps.fall_detection.main",
             "--model",
-            "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-int8.rknn",
+            "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-fp16.rknn",
             "--source",
             "{source}",
             "--camera-id",
@@ -471,12 +471,17 @@ async def read_pipeline_output(camera_id: str, process: asyncio.subprocess.Proce
         if not raw:
             break
         line = raw.decode("utf-8", errors="replace")
+        event = parse_pipeline_line(line)
+        log_line = line
+        if event is not None and event["type"] == "detection" and event["payload"].get("preview_jpeg"):
+            log_payload = dict(event["payload"])
+            log_payload["preview_jpeg"] = f"<omitted:{len(log_payload['preview_jpeg'])} base64 chars>"
+            log_line = json.dumps(log_payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         try:
             with log_path.open("a", encoding="utf-8") as log_file:
-                log_file.write(line)
+                log_file.write(log_line)
         except OSError:
             pass
-        event = parse_pipeline_line(line)
         if event is None:
             continue
         event["camera_id"] = camera_id
@@ -484,7 +489,7 @@ async def read_pipeline_output(camera_id: str, process: asyncio.subprocess.Proce
             runtime.frames += 1
             payload = dict(event["payload"])
             payload["camera_id"] = camera_id
-            runtime.last_result = payload
+            runtime.last_result = {key: value for key, value in payload.items() if key != "preview_jpeg"}
             event["payload"] = payload
             if "fps" in payload:
                 try:

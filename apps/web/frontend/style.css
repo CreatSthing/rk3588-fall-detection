@@ -965,6 +965,11 @@ button:disabled {
   position: absolute;
 }
 
+.detection-preview {
+  display: block;
+  object-fit: fill;
+}
+
 .pose-layer {
   height: 100%;
   inset: 0;

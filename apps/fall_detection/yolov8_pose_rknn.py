@@ -129,7 +129,10 @@ class YoloV8PoseRKNN:
             stride = self.input_size // grid_w
             feature = head.reshape(65, -1)
             scores = _sigmoid(feature[64])
-            selected = np.flatnonzero(scores >= self.object_threshold)
+            # Match Rockchip's reference decoder: a value exactly on the
+            # threshold is not a detection. This also avoids accepting zero
+            # logits (sigmoid == 0.5) from a saturated quantized model.
+            selected = np.flatnonzero(scores > self.object_threshold)
             if selected.size:
                 logits = feature[:64, selected].T.reshape(-1, 4, 16)
                 bins = np.arange(16, dtype=np.float32)

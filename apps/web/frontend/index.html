@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=pose-seven-20260817-2" />
+    <link rel="stylesheet" href="/static/style.css?v=pose-sync-20260817-3" />
   </head>
   <body>
     <div id="app" class="page">
@@ -302,7 +302,13 @@
             <p v-if="camera.last_error" class="error">错误：{{ camera.last_error }}</p>
 
             <div class="video-shell monitor-video">
-              <iframe class="video-frame" :src="camera.player_url_abs" allow="autoplay; fullscreen"></iframe>
+              <img
+                v-if="camera.preview_url"
+                class="video-frame detection-preview"
+                :src="camera.preview_url"
+                alt="AI检测画面"
+              />
+              <iframe v-else class="video-frame" :src="camera.player_url_abs" allow="autoplay; fullscreen"></iframe>
               <div class="overlay">
                 <svg
                   class="pose-layer"
@@ -441,6 +447,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=pose-seven-20260817-2"></script>
+    <script src="/static/app.js?v=pose-sync-20260817-3"></script>
   </body>
 </html>

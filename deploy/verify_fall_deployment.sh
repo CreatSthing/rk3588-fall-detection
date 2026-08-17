@@ -4,7 +4,7 @@ set -eu
 app_root=${1:-/opt/rk3588-camera/current}
 source=${2:-rtsp://127.0.0.1:8554/live/cam1}
 frames=${3:-30}
-model="$app_root/assets/weights/yolov8n-pose-int8.rknn"
+model="$app_root/assets/weights/yolov8n-pose-fp16.rknn"
 work_dir=$(mktemp -d /tmp/rk3588-fall-verify.XXXXXX)
 trap 'rm -rf "$work_dir"' EXIT INT TERM
 

@@ -1,14 +1,21 @@
 {
-  "model": "yolov8n-pose-int8.rknn",
+  "model": "yolov8n-pose-fp16.rknn",
   "target": "rk3588",
   "input_size": [640, 640],
   "rknn_toolkit2": "2.3.2",
   "rknn_runtime": "2.3.2",
-  "rknn_model_sha256": "52fb616049eeaea318242ee7972a65d3da7e44cd3d0e9ab8142678dd28523cc3",
+  "rknn_model_sha256": "3d63f96d834d0d73c3e7e32bac7ca084d820548a9f394bf62ae1c9f526793c17",
   "onnx_sha256": "308495ebe4416b40adf376485252a7b8ba7933a169368b31e74e0f977ded8663",
   "runtime_sha256": "d31fc19c85b85f6091b2bd0f6af9d962d5264a4e410bfb536402ec92bac738e8",
   "rknnlite_wheel_sha256": "4309821b592df85b1fd2a7ff8b863e371ab25d60fca2b86defb8c4542db9d3e9",
-  "calibration": {
+  "precision": "fp16",
+  "reason": "The original INT8 calibration set contained no representative people and saturated positive object logits at 0.0 (sigmoid 0.5). FP16 restores meaningful confidence scores.",
+  "retained_int8": {
+    "model": "yolov8n-pose-int8.rknn",
+    "sha256": "52fb616049eeaea318242ee7972a65d3da7e44cd3d0e9ab8142678dd28523cc3",
+    "status": "rollback-only; do not deploy until recalibrated with representative human poses"
+  },
+  "previous_int8_calibration": {
     "images": 40,
     "source": "installed camera scene",
     "captured_on": "2026-08-17"

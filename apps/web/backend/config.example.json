@@ -21,7 +21,7 @@
         "-m",
         "apps.fall_detection.main",
         "--model",
-        "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-int8.rknn",
+        "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-fp16.rknn",
         "--source",
         "{source}",
         "--camera-id",

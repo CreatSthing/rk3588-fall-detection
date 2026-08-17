@@ -61,8 +61,8 @@ if ! "$app_root/.venv/bin/python" -c 'import cv2, numpy; from rknnlite.api impor
     echo "Install python3-opencv/python3-numpy and place the Runtime-matched RKNNLite wheel under $app_root/vendor/." >&2
     exit 4
 fi
-if [ ! -s "$app_root/assets/weights/yolov8n-pose-int8.rknn" ]; then
-    echo "Missing pose model: $app_root/assets/weights/yolov8n-pose-int8.rknn" >&2
+if [ ! -s "$app_root/assets/weights/yolov8n-pose-fp16.rknn" ]; then
+    echo "Missing pose model: $app_root/assets/weights/yolov8n-pose-fp16.rknn" >&2
     exit 5
 fi
 chmod +x "$app_root/deploy/run_web.sh"

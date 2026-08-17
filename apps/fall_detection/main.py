@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import concurrent.futures
 import json
 import shutil
@@ -30,6 +31,7 @@ class EventClipBuffer:
         self.active: Dict[str, Dict[str, object]] = {}
         self.futures: Dict[concurrent.futures.Future, Dict[str, object]] = {}
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="event-clip")
+        self.latest_jpeg = b""
 
     @staticmethod
     def _write_clip(path: Path, fps: float, frames: List[bytes]) -> Tuple[bool, str]:
@@ -76,7 +78,8 @@ class EventClipBuffer:
     def add_frame(self, timestamp: float, frame) -> List[Dict[str, object]]:
         ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
         if ok:
-            item = (timestamp, encoded.tobytes())
+            self.latest_jpeg = encoded.tobytes()
+            item = (timestamp, self.latest_jpeg)
             self.buffer.append(item)
             for recording in self.active.values():
                 recording["frames"].append(item[1])
@@ -224,6 +227,8 @@ def run(args: argparse.Namespace) -> int:
                     "detections": detections,
                     "events": events,
                 }
+                if args.preview_every > 0 and frame_id % args.preview_every == 0 and clip_buffer.latest_jpeg:
+                    payload["preview_jpeg"] = base64.b64encode(clip_buffer.latest_jpeg).decode("ascii")
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
                 if args.max_frames and frame_id >= args.max_frames:
                     break
@@ -243,7 +248,7 @@ def run(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RK3588 YOLOv8-Pose fall detection pipeline")
-    parser.add_argument("--model", required=True, help="yolov8n-pose INT8 RKNN model")
+    parser.add_argument("--model", required=True, help="yolov8n-pose RKNN model")
     parser.add_argument("--source", required=True, help="RTSP URL, video path, or camera index")
     parser.add_argument("--camera-id", default="cam1")
     parser.add_argument("--event-dir", default="/var/lib/rk3588-camera/events")
@@ -264,6 +269,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pre-event-seconds", type=float, default=5.0)
     parser.add_argument("--post-event-seconds", type=float, default=10.0)
     parser.add_argument("--record-fps", type=float, default=15.0)
+    parser.add_argument(
+        "--preview-every",
+        type=int,
+        default=2,
+        help="attach the exact inference JPEG every N frames for synchronized browser overlays; 0 disables it",
+    )
     parser.add_argument(
         "--decoder",
         choices=("auto", "opencv", "ffmpeg-software"),
