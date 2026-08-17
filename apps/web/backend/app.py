@@ -435,6 +435,8 @@ def parse_pipeline_line(line: str) -> Optional[Dict[str, Any]]:
             pass
 
     lowered = line.lower()
+    if "query dynamic range failed" in lowered and "static shape" in lowered:
+        return {"type": "log", "payload": {"level": "warning", "message": line}}
     if (
         "error while decoding" in lowered
         or "concealing" in lowered

@@ -1,5 +1,5 @@
 [Unit]
-Description=RK3588 Smart Camera Web Console
+Description=RK3588 Fall Detection and Web Alarm Service
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -7,6 +7,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+User=rkcamera
+Group=rkcamera
 EnvironmentFile=/etc/rk3588-camera/web.env
 WorkingDirectory=/opt/rk3588-camera/current
 ExecStartPre=/usr/bin/test -x /opt/rk3588-camera/current/.venv/bin/python
