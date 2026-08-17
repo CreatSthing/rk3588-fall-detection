@@ -6,12 +6,12 @@ createApp({
       cameras: [],
     });
     const system = reactive({
-      cpu: {},
+      cpu: { cores: [] },
       memory: {},
       temperatures: [],
       npu: {},
       mpp: { decoder: [], encoder: [] },
-      rga: { domains: [], clocks: [] },
+      rga: { debug: {}, domains: [], clocks: [] },
     });
     const form = reactive({
       contexts: 8,
@@ -218,6 +218,11 @@ createApp({
       return `${value}%`;
     }
 
+    function barStyle(value) {
+      const percent = value === null || value === undefined ? 0 : Math.max(0, Math.min(100, Number(value)));
+      return { width: `${percent}%` };
+    }
+
     function boxStyle(camera, box = {}) {
       const width = Number(camera.width) || 640;
       const height = Number(camera.height) || 360;
@@ -254,6 +259,7 @@ createApp({
       latestDetections,
       fmt,
       busyText,
+      barStyle,
       startPipeline,
       stopPipeline,
       startRecording,

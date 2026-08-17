@@ -7,6 +7,7 @@ import random
 import re
 import signal
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,6 +71,7 @@ class RuntimeState:
     cameras: Dict[str, CameraRuntime] = field(default_factory=dict)
     clients: Set[WebSocket] = field(default_factory=set)
     last_cpu_sample: Optional[Dict[str, int]] = None
+    last_cpu_core_samples: Dict[str, Dict[str, int]] = field(default_factory=dict)
     last_domain_samples: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 
@@ -377,6 +379,22 @@ def read_text(path: str) -> Optional[str]:
         return None
 
 
+def read_text_timeout(path: str, timeout_sec: float = 0.25) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["cat", path],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
 def read_int(path: str) -> Optional[int]:
     text = read_text(path)
     if text is None:
@@ -398,6 +416,15 @@ def parse_cpu_stat() -> Optional[Dict[str, int]]:
     return {"total": total, "idle": idle}
 
 
+def parse_cpu_line(line: str) -> Optional[Dict[str, int]]:
+    parts = line.split()
+    if not parts or not re.fullmatch(r"cpu\d+", parts[0]):
+        return None
+    values = [int(value) for value in parts[1:]]
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    return {"id": parts[0], "total": sum(values), "idle": idle}
+
+
 def cpu_usage_percent() -> Optional[float]:
     current = parse_cpu_stat()
     previous = state.last_cpu_sample
@@ -409,6 +436,26 @@ def cpu_usage_percent() -> Optional[float]:
     if total_delta <= 0:
         return None
     return round(max(0.0, min(100.0, (1.0 - idle_delta / total_delta) * 100.0)), 1)
+
+
+def cpu_core_metrics() -> List[Dict[str, Any]]:
+    text = read_text("/proc/stat") or ""
+    cores: List[Dict[str, Any]] = []
+    for line in text.splitlines():
+        parsed = parse_cpu_line(line)
+        if not parsed:
+            continue
+        core_id = parsed["id"]
+        previous = state.last_cpu_core_samples.get(core_id)
+        usage = None
+        if previous:
+            total_delta = parsed["total"] - previous["total"]
+            idle_delta = parsed["idle"] - previous["idle"]
+            if total_delta > 0:
+                usage = round(max(0.0, min(100.0, (1.0 - idle_delta / total_delta) * 100.0)), 1)
+        state.last_cpu_core_samples[core_id] = parsed
+        cores.append({"id": core_id, "usage_percent": usage})
+    return cores
 
 
 def memory_metrics() -> Dict[str, Any]:
@@ -469,9 +516,11 @@ def devfreq_metric(name_hint: str) -> Optional[Dict[str, Any]]:
 
 def debug_npu_metric() -> Dict[str, Any]:
     metric = devfreq_metric("npu") or {"name": "npu", "available": False}
-    debug_load = parse_load_percent(read_text("/sys/kernel/debug/rknpu/load"))
+    raw_load = read_text_timeout("/sys/kernel/debug/rknpu/load")
+    debug_load = parse_load_percent(raw_load)
     debug_freq = read_int("/sys/kernel/debug/rknpu/freq")
     debug_power = read_text("/sys/kernel/debug/rknpu/power")
+    temp = next((item["temp_c"] for item in temperature_metrics() if "npu" in item["name"].lower()), None)
     if debug_load is not None:
         metric["load_percent"] = debug_load
         metric["available"] = True
@@ -479,7 +528,17 @@ def debug_npu_metric() -> Dict[str, Any]:
         metric["freq_mhz"] = round(debug_freq / 1_000_000, 1) if debug_freq > 100000 else debug_freq
     if debug_power is not None:
         metric["power"] = debug_power
+    metric["raw_load"] = raw_load
+    metric["temp_c"] = temp
     return metric
+
+
+def debug_rga_metric() -> Dict[str, Any]:
+    raw_load = read_text_timeout("/sys/kernel/debug/rkrga/load")
+    return {
+        "available": raw_load is not None,
+        "raw_load": raw_load,
+    }
 
 
 def domain_busy_percent(domain: str) -> Dict[str, Any]:
@@ -518,17 +577,19 @@ def clock_metric(clock_name: str) -> Dict[str, Any]:
 
 
 def system_metrics() -> Dict[str, Any]:
+    temps = temperature_metrics()
     return {
         "timestamp": time.time(),
-        "cpu": {"usage_percent": cpu_usage_percent()},
+        "cpu": {"usage_percent": cpu_usage_percent(), "cores": cpu_core_metrics()},
         "memory": memory_metrics(),
-        "temperatures": temperature_metrics(),
+        "temperatures": temps,
         "npu": debug_npu_metric(),
         "mpp": {
             "decoder": [domain_busy_percent("rkvdec0"), domain_busy_percent("rkvdec1")],
             "encoder": [domain_busy_percent("venc0"), domain_busy_percent("venc1")],
         },
         "rga": {
+            "debug": debug_rga_metric(),
             "domains": [domain_busy_percent("rga30"), domain_busy_percent("rga31")],
             "clocks": [clock_metric("clk_rga3_0_core"), clock_metric("clk_rga3_1_core")],
         },

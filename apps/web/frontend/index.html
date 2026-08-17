@@ -52,6 +52,15 @@
             <span>CPU 使用率</span>
             <strong>{{ busyText(system.cpu.usage_percent) }}</strong>
           </div>
+          <div class="core-list">
+            <div v-for="core in system.cpu.cores" :key="core.id" class="core-row">
+              <span>{{ core.id }}</span>
+              <div class="core-bar">
+                <i :style="barStyle(core.usage_percent)"></i>
+              </div>
+              <b>{{ busyText(core.usage_percent) }}</b>
+            </div>
+          </div>
           <div class="metric-row">
             <span>内存</span>
             <strong>{{ fmt(system.memory.used_percent, '%') }}</strong>
@@ -65,8 +74,11 @@
             <strong>{{ busyText(system.npu.load_percent) }}</strong>
           </div>
           <div class="metric-sub">
-            NPU 频率：{{ fmt(system.npu.freq_mhz, ' MHz') }}
+            NPU 频率：{{ fmt(system.npu.freq_mhz, ' MHz') }} /
+            温度：{{ fmt(system.npu.temp_c, '℃') }}
           </div>
+          <pre class="raw-watch">/sys/kernel/debug/rknpu/load
+{{ system.npu.raw_load || 'N/A' }}</pre>
           <div class="chips">
             <span v-for="temp in system.temperatures" :key="temp.name">
               {{ temp.name }} {{ temp.temp_c }}℃
@@ -89,6 +101,8 @@
             </span>
           </div>
           <h3>RGA</h3>
+          <pre class="raw-watch">/sys/kernel/debug/rkrga/load
+{{ system.rga.debug.raw_load || 'N/A' }}</pre>
           <div class="chips">
             <span v-for="item in system.rga.domains" :key="item.name">
               {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
@@ -126,8 +140,7 @@
                 <h2>{{ camera.name }} <span class="camera-id">{{ camera.id }}</span></h2>
                 <p>
                   {{ camera.width }}×{{ camera.height }} /
-                  FPS {{ camera.fps || 0 }} /
-                  帧 {{ camera.frames || 0 }}
+                  检测 FPS {{ camera.fps || 0 }}
                 </p>
               </div>
               <div class="camera-state">
@@ -195,6 +208,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=system-metrics-camera-crud-20260817"></script>
+    <script src="/static/app.js?v=raw-hw-monitor-cpu-cores-20260817"></script>
   </body>
 </html>
