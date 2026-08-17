@@ -187,7 +187,7 @@ button:disabled {
 }
 
 .resource-dashboard,
-.raw-panel {
+.accelerator-panel {
   grid-column: span 2;
 }
 
@@ -337,6 +337,12 @@ button:disabled {
   vector-effect: non-scaling-stroke;
 }
 
+.point:hover {
+  opacity: 1;
+  stroke: #f8fafc;
+  stroke-width: 2;
+}
+
 .cpu-point {
   fill: #22c55e;
 }
@@ -392,6 +398,16 @@ button:disabled {
 
 .rga-dot::before {
   background: #a78bfa;
+}
+
+.axis-range {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  color: #93c5fd;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
 }
 
 .core-list {
@@ -466,13 +482,24 @@ button:disabled {
   white-space: pre-wrap;
 }
 
-.parsed-grid {
+.accelerator-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
-.parsed-grid h3 {
+.accelerator-group {
+  background: rgba(2, 6, 23, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.accelerator-wide {
+  grid-column: span 2;
+}
+
+.accelerator-group h3 {
   color: #b6c3d1;
   font-size: 14px;
   margin: 0 0 12px;
@@ -491,6 +518,38 @@ button:disabled {
   color: #cbd5e1;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
+}
+
+.chip-row {
+  align-items: center;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 0;
+}
+
+.chip-row span,
+.chip-row b {
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.chart-tooltip {
+  background: rgba(2, 6, 23, 0.96);
+  border: 1px solid rgba(103, 232, 249, 0.5);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: #e0f2fe;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  left: 0;
+  max-width: 280px;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  z-index: 99;
 }
 
 .add-camera {
@@ -677,8 +736,15 @@ pre {
 
   .camera-grid,
   .camera-controls,
-  .add-camera-grid {
+  .add-camera-grid,
+  .accelerator-grid {
     display: block;
+  }
+
+  .accelerator-group,
+  .accelerator-wide {
+    grid-column: auto;
+    margin-bottom: 12px;
   }
 
   .camera-controls input,

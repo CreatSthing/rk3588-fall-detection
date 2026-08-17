@@ -30,6 +30,12 @@ createApp({
     const message = ref("");
     const logs = ref([]);
     const activeTab = ref("cameras");
+    const chartTooltip = reactive({
+      visible: false,
+      x: 0,
+      y: 0,
+      text: "",
+    });
     const metricHistory = reactive({
       labels: [],
       cpu: [],
@@ -361,6 +367,24 @@ createApp({
       });
     }
 
+    function showChartTooltip(point, event) {
+      chartTooltip.visible = true;
+      chartTooltip.text = point.label;
+      chartTooltip.x = event.clientX + 14;
+      chartTooltip.y = event.clientY + 14;
+    }
+
+    function hideChartTooltip() {
+      chartTooltip.visible = false;
+    }
+
+    function tooltipStyle() {
+      return {
+        left: `${chartTooltip.x}px`,
+        top: `${chartTooltip.y}px`,
+      };
+    }
+
     function boxStyle(camera, box = {}) {
       const width = Number(camera.width) || 640;
       const height = Number(camera.height) || 360;
@@ -390,6 +414,7 @@ createApp({
       form,
       newCamera,
       activeTab,
+      chartTooltip,
       metricHistory,
       wsConnected,
       message,
@@ -409,6 +434,9 @@ createApp({
       chartPoints,
       tempPolylinePoints,
       tempChartPoints,
+      showChartTooltip,
+      hideChartTooltip,
+      tooltipStyle,
       startPipeline,
       stopPipeline,
       startRecording,

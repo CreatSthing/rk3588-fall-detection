@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=parsed-npu-rga-autoscale-20260817" />
+    <link rel="stylesheet" href="/static/style.css?v=monitor-tooltip-grouped-20260817" />
   </head>
   <body>
     <div id="app" class="page">
@@ -128,7 +128,13 @@
         </section>
 
         <section v-if="activeTab === 'resources'" class="card trend-card">
-          <h2>资源趋势</h2>
+          <div class="section-head">
+            <div>
+              <h2>资源趋势</h2>
+              <p>自适应纵轴：小幅波动也会被放大；鼠标放到点上可看具体值。</p>
+            </div>
+            <span class="axis-range">{{ resourceStats().min }}% ~ {{ resourceStats().max }}%</span>
+          </div>
           <svg class="line-chart" viewBox="0 0 320 100" preserveAspectRatio="none">
             <line x1="0" y1="20" x2="320" y2="20" class="chart-grid-line"></line>
             <line x1="0" y1="50" x2="320" y2="50" class="chart-grid-line"></line>
@@ -137,10 +143,10 @@
             <polyline :points="polylinePoints(metricHistory.memory, 320, 100, resourceStats())" class="line mem-line"></polyline>
             <polyline :points="polylinePoints(metricHistory.npu, 320, 100, resourceStats())" class="line npu-line"></polyline>
             <polyline :points="polylinePoints(metricHistory.rga, 320, 100, resourceStats())" class="line rga-line"></polyline>
-            <circle v-for="point in chartPoints(metricHistory.cpu, metricHistory.labels, 320, 100, resourceStats(), 'CPU')" :key="`cpu-${point.x}-${point.y}`" class="point cpu-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
-            <circle v-for="point in chartPoints(metricHistory.memory, metricHistory.labels, 320, 100, resourceStats(), '内存')" :key="`mem-${point.x}-${point.y}`" class="point mem-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
-            <circle v-for="point in chartPoints(metricHistory.npu, metricHistory.labels, 320, 100, resourceStats(), 'NPU')" :key="`npu-${point.x}-${point.y}`" class="point npu-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
-            <circle v-for="point in chartPoints(metricHistory.rga, metricHistory.labels, 320, 100, resourceStats(), 'RGA')" :key="`rga-${point.x}-${point.y}`" class="point rga-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
+            <circle v-for="point in chartPoints(metricHistory.cpu, metricHistory.labels, 320, 100, resourceStats(), 'CPU')" :key="`cpu-${point.x}-${point.y}`" class="point cpu-point" :cx="point.x" :cy="point.y" r="4" @mousemove="showChartTooltip(point, $event)" @mouseleave="hideChartTooltip"></circle>
+            <circle v-for="point in chartPoints(metricHistory.memory, metricHistory.labels, 320, 100, resourceStats(), '内存')" :key="`mem-${point.x}-${point.y}`" class="point mem-point" :cx="point.x" :cy="point.y" r="4" @mousemove="showChartTooltip(point, $event)" @mouseleave="hideChartTooltip"></circle>
+            <circle v-for="point in chartPoints(metricHistory.npu, metricHistory.labels, 320, 100, resourceStats(), 'NPU')" :key="`npu-${point.x}-${point.y}`" class="point npu-point" :cx="point.x" :cy="point.y" r="4" @mousemove="showChartTooltip(point, $event)" @mouseleave="hideChartTooltip"></circle>
+            <circle v-for="point in chartPoints(metricHistory.rga, metricHistory.labels, 320, 100, resourceStats(), 'RGA')" :key="`rga-${point.x}-${point.y}`" class="point rga-point" :cx="point.x" :cy="point.y" r="4" @mousemove="showChartTooltip(point, $event)" @mouseleave="hideChartTooltip"></circle>
           </svg>
           <div class="legend">
             <span class="cpu-dot">CPU</span>
@@ -151,13 +157,18 @@
         </section>
 
         <section v-if="activeTab === 'resources'" class="card trend-card">
-          <h2>温度趋势</h2>
+          <div class="section-head">
+            <div>
+              <h2>温度趋势</h2>
+              <p>展示 NPU 温度趋势，下面保留各 thermal zone 当前温度。</p>
+            </div>
+          </div>
           <svg class="line-chart" viewBox="0 0 320 100" preserveAspectRatio="none">
             <line x1="0" y1="20" x2="320" y2="20" class="chart-grid-line"></line>
             <line x1="0" y1="50" x2="320" y2="50" class="chart-grid-line"></line>
             <line x1="0" y1="80" x2="320" y2="80" class="chart-grid-line"></line>
             <polyline :points="tempPolylinePoints(metricHistory.temp)" class="line temp-line"></polyline>
-            <circle v-for="point in tempChartPoints(metricHistory.temp, metricHistory.labels)" :key="`temp-${point.x}-${point.y}`" class="point temp-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
+            <circle v-for="point in tempChartPoints(metricHistory.temp, metricHistory.labels)" :key="`temp-${point.x}-${point.y}`" class="point temp-point" :cx="point.x" :cy="point.y" r="4" @mousemove="showChartTooltip(point, $event)" @mouseleave="hideChartTooltip"></circle>
           </svg>
           <div class="chips">
             <span v-for="temp in system.temperatures" :key="temp.name">
@@ -166,35 +177,10 @@
           </div>
         </section>
 
-        <section v-if="activeTab === 'resources'" class="card hardware">
-          <h2>MPP / RGA</h2>
-          <h3>MPP 解码</h3>
-          <div class="chips">
-            <span v-for="item in system.mpp.decoder" :key="item.name">
-              {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
-            </span>
-          </div>
-          <h3>MPP 编码</h3>
-          <div class="chips">
-            <span v-for="item in system.mpp.encoder" :key="item.name">
-              {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
-            </span>
-          </div>
-          <h3>RGA</h3>
-          <div class="chips">
-            <span v-for="item in system.rga.domains" :key="item.name">
-              {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
-            </span>
-            <span v-for="clock in system.rga.clocks" :key="clock.name">
-              {{ clock.name }} {{ clock.available ? fmt(clock.freq_mhz, ' MHz') : 'N/A' }}
-            </span>
-          </div>
-        </section>
-
-        <section v-if="activeTab === 'resources'" class="card raw-panel">
-          <h2>NPU / RGA 解析结果</h2>
-          <div class="parsed-grid">
-            <div>
+        <section v-if="activeTab === 'resources'" class="card accelerator-panel">
+          <h2>硬件加速器详情</h2>
+          <div class="accelerator-grid">
+            <div class="accelerator-group">
               <h3>NPU Core 负载</h3>
               <div v-for="core in system.npu.cores" :key="`parsed-${core.name}`" class="parsed-row">
                 <span>{{ core.name }}</span>
@@ -202,7 +188,7 @@
                 <b>{{ busyText(core.load_percent) }}</b>
               </div>
             </div>
-            <div>
+            <div class="accelerator-group">
               <h3>RGA Scheduler 负载</h3>
               <div v-for="item in system.rga.debug.schedulers" :key="`parsed-${item.name}`" class="parsed-row">
                 <span>{{ item.name }}</span>
@@ -210,8 +196,37 @@
                 <b>{{ busyText(item.load_percent) }}</b>
               </div>
             </div>
+            <div class="accelerator-group">
+              <h3>MPP 解码域</h3>
+              <div v-for="item in system.mpp.decoder" :key="`dec-${item.name}`" class="chip-row">
+                <span>{{ item.name }}</span>
+                <b>{{ item.available ? busyText(item.busy_percent) : 'N/A' }}</b>
+              </div>
+            </div>
+            <div class="accelerator-group">
+              <h3>MPP 编码域</h3>
+              <div v-for="item in system.mpp.encoder" :key="`enc-${item.name}`" class="chip-row">
+                <span>{{ item.name }}</span>
+                <b>{{ item.available ? busyText(item.busy_percent) : 'N/A' }}</b>
+              </div>
+            </div>
+            <div class="accelerator-group accelerator-wide">
+              <h3>RGA 时钟 / 电源域</h3>
+              <div class="chips">
+                <span v-for="item in system.rga.domains" :key="`domain-${item.name}`">
+                  {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
+                </span>
+                <span v-for="clock in system.rga.clocks" :key="clock.name">
+                  {{ clock.name }} {{ clock.available ? fmt(clock.freq_mhz, ' MHz') : 'N/A' }}
+                </span>
+              </div>
+            </div>
           </div>
         </section>
+
+        <div v-if="chartTooltip.visible" class="chart-tooltip" :style="tooltipStyle()">
+          {{ chartTooltip.text }}
+        </div>
 
         <section v-if="activeTab === 'cameras'" class="card add-camera">
           <h2>添加摄像头</h2>
@@ -308,6 +323,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=parsed-npu-rga-autoscale-20260817"></script>
+    <script src="/static/app.js?v=monitor-tooltip-grouped-20260817"></script>
   </body>
 </html>
