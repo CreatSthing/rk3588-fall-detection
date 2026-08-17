@@ -34,9 +34,12 @@ class EventClipBuffer:
         self.latest_jpeg = b""
 
     @staticmethod
-    def _write_clip(path: Path, fps: float, frames: List[bytes]) -> Tuple[bool, str]:
+    def _write_clip(path: Path, fps: float, frames: List[Tuple[float, bytes]]) -> Tuple[bool, str]:
         if not frames:
             return False, "no buffered frames"
+        if len(frames) > 1 and frames[-1][0] > frames[0][0]:
+            fps = max(1.0, min((len(frames) - 1) / (frames[-1][0] - frames[0][0]), 60.0))
+        encoded_frames = [encoded for _, encoded in frames]
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg:
             command = [
@@ -46,13 +49,13 @@ class EventClipBuffer:
                 "-i", "pipe:0", "-an", "-c:v", "libx264", "-preset", "veryfast",
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path),
             ]
-            completed = subprocess.run(command, input=b"".join(frames), capture_output=True)
+            completed = subprocess.run(command, input=b"".join(encoded_frames), capture_output=True)
             if completed.returncode == 0 and path.exists() and path.stat().st_size > 0:
                 return True, ""
             error = completed.stderr.decode("utf-8", errors="replace").strip()[-1000:]
         else:
             error = "ffmpeg not found"
-        first = cv2.imdecode(np.frombuffer(frames[0], dtype=np.uint8), cv2.IMREAD_COLOR)
+        first = cv2.imdecode(np.frombuffer(encoded_frames[0], dtype=np.uint8), cv2.IMREAD_COLOR)
         if first is None:
             return False, "cannot decode buffered frame"
         writer = None
@@ -67,7 +70,7 @@ class EventClipBuffer:
         if writer is None:
             return False, f"FFmpeg failed ({error}); OpenCV cannot open MP4 event writer"
         try:
-            for encoded in frames:
+            for encoded in encoded_frames:
                 frame = cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), cv2.IMREAD_COLOR)
                 if frame is not None:
                     writer.write(frame)
@@ -82,7 +85,7 @@ class EventClipBuffer:
             item = (timestamp, self.latest_jpeg)
             self.buffer.append(item)
             for recording in self.active.values():
-                recording["frames"].append(item[1])
+                recording["frames"].append(item)
 
         for event_id, recording in list(self.active.items()):
             if timestamp < float(recording["deadline"]):
@@ -106,7 +109,7 @@ class EventClipBuffer:
             "timestamp": event.get("timestamp") or timestamp,
             "path": path,
             "deadline": timestamp + self.post_seconds,
-            "frames": [encoded for _, encoded in self.buffer],
+            "frames": list(self.buffer),
         }
         return path
 
@@ -222,6 +225,7 @@ def run(args: argparse.Namespace) -> int:
                     "frame_id": frame_id,
                     "timestamp": now,
                     "fps": round(frame_id / elapsed, 2),
+                    "source_frames_dropped": int(getattr(capture, "dropped_frames", 0)),
                     "width": int(frame.shape[1]),
                     "height": int(frame.shape[0]),
                     "detections": detections,

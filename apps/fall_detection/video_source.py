@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Optional, Union
@@ -89,9 +90,10 @@ class FFmpegSoftwareVideoSource:
         self.height = metadata.height
         self.fps = metadata.fps
         self.frame_bytes = self.width * self.height * 3
+        self.live = is_network_source(source)
         command = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
         if source.lower().startswith("rtsp://"):
-            command += ["-rtsp_transport", "tcp"]
+            command += ["-rtsp_transport", "tcp", "-fflags", "nobuffer", "-flags", "low_delay"]
         if metadata.codec:
             command += ["-c:v", metadata.codec]
         command += ["-i", source, "-map", "0:v:0", "-an", "-sn", "-dn", "-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"]
@@ -99,8 +101,26 @@ class FFmpegSoftwareVideoSource:
         if self.process.stdout is None:
             self.process.kill()
             raise RuntimeError("ffmpeg stdout pipe was not created")
+        self._condition = threading.Condition()
+        self._latest_frame = None
+        self._latest_sequence = 0
+        self._delivered_sequence = 0
+        self.dropped_frames = 0
+        self._eof = False
+        self._closed = False
+        self._reader_thread = None
+        if self.live:
+            # A raw stdout pipe is a FIFO. When inference is slower than the
+            # camera, reading it in the inference loop accumulates minutes of
+            # old video. Drain continuously and expose only the newest frame.
+            self._reader_thread = threading.Thread(
+                target=self._drain_latest,
+                name="ffmpeg-latest-frame",
+                daemon=True,
+            )
+            self._reader_thread.start()
 
-    def read(self):
+    def _read_frame(self):
         chunks = bytearray()
         while len(chunks) < self.frame_bytes:
             data = self.process.stdout.read(self.frame_bytes - len(chunks))
@@ -110,7 +130,38 @@ class FFmpegSoftwareVideoSource:
         frame = np.frombuffer(chunks, dtype=np.uint8).reshape(self.height, self.width, 3)
         return True, frame
 
+    def _drain_latest(self) -> None:
+        while not self._closed:
+            ok, frame = self._read_frame()
+            with self._condition:
+                if not ok:
+                    self._eof = True
+                    self._condition.notify_all()
+                    return
+                self._latest_frame = frame
+                self._latest_sequence += 1
+                self._condition.notify_all()
+
+    def read(self):
+        if not self.live:
+            return self._read_frame()
+        with self._condition:
+            while (
+                not self._closed
+                and not self._eof
+                and self._latest_sequence == self._delivered_sequence
+            ):
+                self._condition.wait(timeout=1.0)
+            if self._latest_sequence != self._delivered_sequence:
+                self.dropped_frames += max(0, self._latest_sequence - self._delivered_sequence - 1)
+                self._delivered_sequence = self._latest_sequence
+                return True, self._latest_frame
+            return False, None
+
     def close(self) -> None:
+        self._closed = True
+        with self._condition:
+            self._condition.notify_all()
         if self.process.poll() is None:
             self.process.terminate()
             try:
@@ -118,6 +169,8 @@ class FFmpegSoftwareVideoSource:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=3)
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=3)
         if self.process.stdout is not None:
             self.process.stdout.close()
 

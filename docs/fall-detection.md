@@ -23,6 +23,8 @@
 
 为避免 WebRTC 播放延迟导致骨架与人体错位，管线默认每2帧携带一张与关键点完全同步的 JPEG，前端只用这一对数据同时更新“AI检测画面”和 SVG。可用 `--preview-every 0` 禁用预览图。
 
+网络流由后台线程持续解码、只保留最新完整帧。输入帧率高于 NPU 推理帧率时会主动跳过旧帧，并在结果中累计 `source_frames_dropped`，因此不会因为 FIFO 排队逐渐落后几分钟。本地离线视频不启用跳帧。
+
 ## 模型准备
 
 使用 Rockchip RKNN Model Zoo 提供的优化版 `yolov8n-pose.onnx`，不要直接用 Ultralytics 原始导出的单输出 ONNX 替换，两者的输出格式不同。
