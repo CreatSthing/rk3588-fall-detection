@@ -9,10 +9,10 @@ createApp({
       contexts: 8,
       dryRun: false,
     });
-    const cameraForms = reactive({});
     const wsConnected = ref(false);
     const message = ref("");
     const logs = ref([]);
+    const cameraFormCache = {};
 
     const totalRunning = computed(() => status.cameras.filter((camera) => camera.running).length);
     const totalStreaming = computed(() => status.cameras.filter((camera) => camera.streaming).length);
@@ -23,16 +23,15 @@ createApp({
       return `${location.protocol}//${location.hostname}:8889${url}`;
     }
 
-    function ensureCameraForms(cameras) {
-      for (const camera of cameras) {
-        if (!cameraForms[camera.id]) {
-          cameraForms[camera.id] = {
-            source: "",
-            contexts: form.contexts,
-            dryRun: form.dryRun,
-          };
-        }
+    function formForCamera(cameraId) {
+      if (!cameraFormCache[cameraId]) {
+        cameraFormCache[cameraId] = reactive({
+          source: "",
+          contexts: form.contexts,
+          dryRun: form.dryRun,
+        });
       }
+      return cameraFormCache[cameraId];
     }
 
     function appendLog(text, cameraId = "") {
@@ -46,13 +45,13 @@ createApp({
       const cameras = Array.isArray(payload.cameras) ? payload.cameras : [payload].filter(Boolean);
       status.cameras = cameras.map((camera) => ({
         ...camera,
+        form: formForCamera(camera.id),
         player_url_abs: normalizePlayerUrl(camera.player_url),
         rtsp_url_abs: camera.rtsp_url || `rtsp://${location.hostname}:8554/live/${camera.id}`,
-        hls_url_abs: camera.hls_url?.startsWith("http")
+        hls_url_abs: camera.hls_url && camera.hls_url.startsWith("http")
           ? camera.hls_url
           : `${location.protocol}//${location.hostname}:8888${camera.hls_url || `/live/${camera.id}/index.m3u8`}`,
       }));
-      ensureCameraForms(status.cameras);
     }
 
     function updateCameraDetection(cameraId, payload) {
@@ -107,7 +106,7 @@ createApp({
     }
 
     async function startPipeline(camera) {
-      const item = cameraForms[camera.id] || {};
+      const item = camera.form || formForCamera(camera.id);
       try {
         await callApi(`/api/cameras/${camera.id}/pipeline/start`, {
           source: item.source || null,
@@ -168,7 +167,6 @@ createApp({
     return {
       status,
       form,
-      cameraForms,
       wsConnected,
       message,
       logs,

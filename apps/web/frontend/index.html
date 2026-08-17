@@ -77,12 +77,12 @@
 
             <div class="camera-controls">
               <input
-                v-model="cameraForms[camera.id].source"
+                v-model="camera.form.source"
                 placeholder="留空使用后端配置；也可填 rtsp://... 或本地视频路径"
               />
-              <input v-model.number="cameraForms[camera.id].contexts" type="number" min="1" max="20" />
+              <input v-model.number="camera.form.contexts" type="number" min="1" max="20" />
               <label class="check compact">
-                <input v-model="cameraForms[camera.id].dryRun" type="checkbox" />
+                <input v-model="camera.form.dryRun" type="checkbox" />
                 模拟
               </label>
             </div>
@@ -132,6 +132,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=multicam-form-fix-20260817"></script>
   </body>
 </html>
