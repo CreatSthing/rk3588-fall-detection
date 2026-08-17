@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/style.css?v=resource-svg-charts-20260817" />
   </head>
   <body>
     <div id="app" class="page">
@@ -64,29 +64,41 @@
           </div>
           <div class="donut-grid">
             <div class="donut-card">
-              <div class="donut" :style="donutStyle(system.cpu.usage_percent)">
-                <span>{{ busyText(system.cpu.usage_percent) }}</span>
-              </div>
+              <svg class="gauge" viewBox="0 0 120 120">
+                <circle class="gauge-bg" cx="60" cy="60" r="48" pathLength="100"></circle>
+                <circle class="gauge-value cpu-gauge" cx="60" cy="60" r="48" pathLength="100" :stroke-dasharray="gaugeDash(system.cpu.usage_percent)"></circle>
+                <text x="60" y="57" text-anchor="middle">{{ busyText(system.cpu.usage_percent) }}</text>
+                <text class="gauge-unit" x="60" y="76" text-anchor="middle">usage</text>
+              </svg>
               <b>CPU</b>
             </div>
             <div class="donut-card">
-              <div class="donut" :style="donutStyle(system.memory.used_percent)">
-                <span>{{ fmt(system.memory.used_percent, '%') }}</span>
-              </div>
+              <svg class="gauge" viewBox="0 0 120 120">
+                <circle class="gauge-bg" cx="60" cy="60" r="48" pathLength="100"></circle>
+                <circle class="gauge-value mem-gauge" cx="60" cy="60" r="48" pathLength="100" :stroke-dasharray="gaugeDash(system.memory.used_percent)"></circle>
+                <text x="60" y="57" text-anchor="middle">{{ fmt(system.memory.used_percent, '%') }}</text>
+                <text class="gauge-unit" x="60" y="76" text-anchor="middle">memory</text>
+              </svg>
               <b>内存</b>
               <small>{{ fmt(system.memory.used_mb, ' MB') }} / {{ fmt(system.memory.total_mb, ' MB') }}</small>
             </div>
             <div class="donut-card">
-              <div class="donut" :style="donutStyle(system.npu.load_percent)">
-                <span>{{ busyText(system.npu.load_percent) }}</span>
-              </div>
+              <svg class="gauge" viewBox="0 0 120 120">
+                <circle class="gauge-bg" cx="60" cy="60" r="48" pathLength="100"></circle>
+                <circle class="gauge-value npu-gauge" cx="60" cy="60" r="48" pathLength="100" :stroke-dasharray="gaugeDash(system.npu.load_percent)"></circle>
+                <text x="60" y="57" text-anchor="middle">{{ busyText(system.npu.load_percent) }}</text>
+                <text class="gauge-unit" x="60" y="76" text-anchor="middle">npu</text>
+              </svg>
               <b>NPU</b>
               <small>{{ fmt(system.npu.freq_mhz, ' MHz') }} / {{ fmt(system.npu.temp_c, '℃') }}</small>
             </div>
             <div class="donut-card">
-              <div class="donut" :style="donutStyle(avgBusy(system.rga.domains))">
-                <span>{{ busyText(avgBusy(system.rga.domains)) }}</span>
-              </div>
+              <svg class="gauge" viewBox="0 0 120 120">
+                <circle class="gauge-bg" cx="60" cy="60" r="48" pathLength="100"></circle>
+                <circle class="gauge-value rga-gauge" cx="60" cy="60" r="48" pathLength="100" :stroke-dasharray="gaugeDash(avgBusy(system.rga.domains))"></circle>
+                <text x="60" y="57" text-anchor="middle">{{ busyText(avgBusy(system.rga.domains)) }}</text>
+                <text class="gauge-unit" x="60" y="76" text-anchor="middle">rga</text>
+              </svg>
               <b>RGA</b>
             </div>
           </div>
@@ -107,7 +119,10 @@
 
         <section v-if="activeTab === 'resources'" class="card trend-card">
           <h2>资源趋势</h2>
-          <svg class="line-chart" viewBox="0 0 320 88" preserveAspectRatio="none">
+          <svg class="line-chart" viewBox="0 0 320 100" preserveAspectRatio="none">
+            <line x1="0" y1="20" x2="320" y2="20" class="chart-grid-line"></line>
+            <line x1="0" y1="50" x2="320" y2="50" class="chart-grid-line"></line>
+            <line x1="0" y1="80" x2="320" y2="80" class="chart-grid-line"></line>
             <polyline :points="polylinePoints(metricHistory.cpu)" class="line cpu-line"></polyline>
             <polyline :points="polylinePoints(metricHistory.memory)" class="line mem-line"></polyline>
             <polyline :points="polylinePoints(metricHistory.npu)" class="line npu-line"></polyline>
@@ -121,7 +136,10 @@
 
         <section v-if="activeTab === 'resources'" class="card trend-card">
           <h2>温度趋势</h2>
-          <svg class="line-chart" viewBox="0 0 320 88" preserveAspectRatio="none">
+          <svg class="line-chart" viewBox="0 0 320 100" preserveAspectRatio="none">
+            <line x1="0" y1="20" x2="320" y2="20" class="chart-grid-line"></line>
+            <line x1="0" y1="50" x2="320" y2="50" class="chart-grid-line"></line>
+            <line x1="0" y1="80" x2="320" y2="80" class="chart-grid-line"></line>
             <polyline :points="tempPolylinePoints(metricHistory.temp)" class="line temp-line"></polyline>
           </svg>
           <div class="chips">
@@ -259,6 +277,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=resource-tabs-charts-20260817"></script>
+    <script src="/static/app.js?v=resource-svg-charts-20260817"></script>
   </body>
 </html>

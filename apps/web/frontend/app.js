@@ -248,11 +248,13 @@ createApp({
       return { width: `${percent}%` };
     }
 
-    function donutStyle(value) {
-      const percent = value === null || value === undefined ? 0 : Math.max(0, Math.min(100, Number(value)));
-      return {
-        background: `conic-gradient(#22c55e 0 ${percent}%, rgba(30, 41, 59, 0.95) ${percent}% 100%)`,
-      };
+    function percentValue(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return 0;
+      return Math.max(0, Math.min(100, Number(value)));
+    }
+
+    function gaugeDash(value) {
+      return `${percentValue(value)} 100`;
     }
 
     function avgBusy(items = []) {
@@ -264,7 +266,7 @@ createApp({
       return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
     }
 
-    function polylinePoints(values = [], width = 320, height = 88, maxValue = 100) {
+    function polylinePoints(values = [], width = 320, height = 100, maxValue = 100) {
       if (!values.length) return "";
       if (values.length === 1) return `0,${height - (values[0] / maxValue) * height}`;
       return values
@@ -276,7 +278,7 @@ createApp({
         .join(" ");
     }
 
-    function tempPolylinePoints(values = [], width = 320, height = 88) {
+    function tempPolylinePoints(values = [], width = 320, height = 100) {
       const valid = values.filter((value) => Number(value) > 0);
       if (!valid.length) return "";
       const min = Math.min(...valid, 20);
@@ -331,7 +333,8 @@ createApp({
       fmt,
       busyText,
       barStyle,
-      donutStyle,
+      percentValue,
+      gaugeDash,
       avgBusy,
       polylinePoints,
       tempPolylinePoints,
