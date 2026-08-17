@@ -9,9 +9,9 @@ createApp({
       cpu: { cores: [] },
       memory: {},
       temperatures: [],
-      npu: {},
+      npu: { cores: [] },
       mpp: { decoder: [], encoder: [] },
-      rga: { debug: {}, domains: [], clocks: [] },
+      rga: { debug: { schedulers: [] }, domains: [], clocks: [] },
     });
     const form = reactive({
       contexts: 8,
@@ -35,6 +35,7 @@ createApp({
       cpu: [],
       memory: [],
       npu: [],
+      rga: [],
       temp: [],
     });
     const cameraFormCache = {};
@@ -150,8 +151,9 @@ createApp({
       metricHistory.cpu.push(Number(payload.cpu?.usage_percent ?? 0));
       metricHistory.memory.push(Number(payload.memory?.used_percent ?? 0));
       metricHistory.npu.push(Number(payload.npu?.load_percent ?? 0));
+      metricHistory.rga.push(Number(payload.rga?.debug?.load_percent ?? 0));
       metricHistory.temp.push(Number((npuTemp && npuTemp.temp_c) || payload.npu?.temp_c || 0));
-      for (const key of ["labels", "cpu", "memory", "npu", "temp"]) {
+      for (const key of ["labels", "cpu", "memory", "npu", "rga", "temp"]) {
         if (metricHistory[key].length > 40) metricHistory[key].shift();
       }
     }
@@ -266,16 +268,64 @@ createApp({
       return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
     }
 
-    function polylinePoints(values = [], width = 320, height = 100, maxValue = 100) {
+    function maxLoad(items = []) {
+      const values = items
+        .map((item) => item.load_percent)
+        .filter((value) => value !== null && value !== undefined)
+        .map(Number);
+      if (!values.length) return null;
+      return Number(Math.max(...values).toFixed(1));
+    }
+
+    function seriesStats(seriesList = []) {
+      const values = seriesList.flat().map(Number).filter((value) => Number.isFinite(value));
+      if (!values.length) return { min: 0, max: 100 };
+      let min = Math.min(...values);
+      let max = Math.max(...values);
+      if (max - min < 8) {
+        const mid = (max + min) / 2;
+        min = mid - 4;
+        max = mid + 4;
+      }
+      min = Math.max(0, Math.floor(min - 1));
+      max = Math.min(100, Math.ceil(max + 1));
+      if (max <= min) max = min + 1;
+      return { min, max };
+    }
+
+    function resourceStats() {
+      return seriesStats([metricHistory.cpu, metricHistory.memory, metricHistory.npu, metricHistory.rga]);
+    }
+
+    function polylinePoints(values = [], width = 320, height = 100, stats = null) {
       if (!values.length) return "";
-      if (values.length === 1) return `0,${height - (values[0] / maxValue) * height}`;
+      const range = stats || seriesStats([values]);
+      const span = Math.max(1, range.max - range.min);
+      if (values.length === 1) return `0,${height - ((values[0] - range.min) / span) * height}`;
       return values
         .map((value, index) => {
           const x = (index / (values.length - 1)) * width;
-          const y = height - (Math.max(0, Math.min(maxValue, Number(value))) / maxValue) * height;
+          const normalized = (Number(value) - range.min) / span;
+          const y = height - Math.max(0, Math.min(1, normalized)) * height;
           return `${x.toFixed(1)},${y.toFixed(1)}`;
         })
         .join(" ");
+    }
+
+    function chartPoints(values = [], labels = [], width = 320, height = 100, stats = null, name = "", unit = "%") {
+      if (!values.length) return [];
+      const range = stats || seriesStats([values]);
+      const span = Math.max(1, range.max - range.min);
+      return values.map((value, index) => {
+        const x = values.length === 1 ? 0 : (index / (values.length - 1)) * width;
+        const normalized = (Number(value) - range.min) / span;
+        const y = height - Math.max(0, Math.min(1, normalized)) * height;
+        return {
+          x: Number(x.toFixed(1)),
+          y: Number(y.toFixed(1)),
+          label: `${labels[index] || ""} ${name}: ${Number(value).toFixed(1)}${unit}`,
+        };
+      });
     }
 
     function tempPolylinePoints(values = [], width = 320, height = 100) {
@@ -292,6 +342,23 @@ createApp({
           return `${x.toFixed(1)},${Math.max(0, Math.min(height, y)).toFixed(1)}`;
         })
         .join(" ");
+    }
+
+    function tempChartPoints(values = [], labels = [], width = 320, height = 100) {
+      const valid = values.filter((value) => Number(value) > 0);
+      if (!valid.length) return [];
+      const min = Math.min(...valid, 20);
+      const max = Math.max(...valid, 90);
+      const range = Math.max(1, max - min);
+      return values.map((value, index) => {
+        const x = values.length === 1 ? 0 : (index / (values.length - 1)) * width;
+        const y = height - ((Number(value) - min) / range) * height;
+        return {
+          x: Number(x.toFixed(1)),
+          y: Number(Math.max(0, Math.min(height, y)).toFixed(1)),
+          label: `${labels[index] || ""} 温度: ${Number(value).toFixed(1)}℃`,
+        };
+      });
     }
 
     function boxStyle(camera, box = {}) {
@@ -336,8 +403,12 @@ createApp({
       percentValue,
       gaugeDash,
       avgBusy,
+      maxLoad,
+      resourceStats,
       polylinePoints,
+      chartPoints,
       tempPolylinePoints,
+      tempChartPoints,
       startPipeline,
       stopPipeline,
       startRecording,

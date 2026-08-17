@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=resource-svg-charts-20260817" />
+    <link rel="stylesheet" href="/static/style.css?v=parsed-npu-rga-autoscale-20260817" />
   </head>
   <body>
     <div id="app" class="page">
@@ -91,15 +91,25 @@
               </svg>
               <b>NPU</b>
               <small>{{ fmt(system.npu.freq_mhz, ' MHz') }} / {{ fmt(system.npu.temp_c, '℃') }}</small>
+              <div class="mini-loads">
+                <span v-for="core in system.npu.cores" :key="core.name">
+                  {{ core.name }} {{ busyText(core.load_percent) }}
+                </span>
+              </div>
             </div>
             <div class="donut-card">
               <svg class="gauge" viewBox="0 0 120 120">
                 <circle class="gauge-bg" cx="60" cy="60" r="48" pathLength="100"></circle>
-                <circle class="gauge-value rga-gauge" cx="60" cy="60" r="48" pathLength="100" :stroke-dasharray="gaugeDash(avgBusy(system.rga.domains))"></circle>
-                <text x="60" y="57" text-anchor="middle">{{ busyText(avgBusy(system.rga.domains)) }}</text>
+                <circle class="gauge-value rga-gauge" cx="60" cy="60" r="48" pathLength="100" :stroke-dasharray="gaugeDash(system.rga.debug.load_percent)"></circle>
+                <text x="60" y="57" text-anchor="middle">{{ busyText(system.rga.debug.load_percent) }}</text>
                 <text class="gauge-unit" x="60" y="76" text-anchor="middle">rga</text>
               </svg>
               <b>RGA</b>
+              <div class="mini-loads">
+                <span v-for="item in system.rga.debug.schedulers" :key="item.name">
+                  {{ item.name }} {{ busyText(item.load_percent) }}
+                </span>
+              </div>
             </div>
           </div>
         </section>
@@ -123,14 +133,20 @@
             <line x1="0" y1="20" x2="320" y2="20" class="chart-grid-line"></line>
             <line x1="0" y1="50" x2="320" y2="50" class="chart-grid-line"></line>
             <line x1="0" y1="80" x2="320" y2="80" class="chart-grid-line"></line>
-            <polyline :points="polylinePoints(metricHistory.cpu)" class="line cpu-line"></polyline>
-            <polyline :points="polylinePoints(metricHistory.memory)" class="line mem-line"></polyline>
-            <polyline :points="polylinePoints(metricHistory.npu)" class="line npu-line"></polyline>
+            <polyline :points="polylinePoints(metricHistory.cpu, 320, 100, resourceStats())" class="line cpu-line"></polyline>
+            <polyline :points="polylinePoints(metricHistory.memory, 320, 100, resourceStats())" class="line mem-line"></polyline>
+            <polyline :points="polylinePoints(metricHistory.npu, 320, 100, resourceStats())" class="line npu-line"></polyline>
+            <polyline :points="polylinePoints(metricHistory.rga, 320, 100, resourceStats())" class="line rga-line"></polyline>
+            <circle v-for="point in chartPoints(metricHistory.cpu, metricHistory.labels, 320, 100, resourceStats(), 'CPU')" :key="`cpu-${point.x}-${point.y}`" class="point cpu-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
+            <circle v-for="point in chartPoints(metricHistory.memory, metricHistory.labels, 320, 100, resourceStats(), '内存')" :key="`mem-${point.x}-${point.y}`" class="point mem-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
+            <circle v-for="point in chartPoints(metricHistory.npu, metricHistory.labels, 320, 100, resourceStats(), 'NPU')" :key="`npu-${point.x}-${point.y}`" class="point npu-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
+            <circle v-for="point in chartPoints(metricHistory.rga, metricHistory.labels, 320, 100, resourceStats(), 'RGA')" :key="`rga-${point.x}-${point.y}`" class="point rga-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
           </svg>
           <div class="legend">
             <span class="cpu-dot">CPU</span>
             <span class="mem-dot">内存</span>
             <span class="npu-dot">NPU</span>
+            <span class="rga-dot">RGA</span>
           </div>
         </section>
 
@@ -141,6 +157,7 @@
             <line x1="0" y1="50" x2="320" y2="50" class="chart-grid-line"></line>
             <line x1="0" y1="80" x2="320" y2="80" class="chart-grid-line"></line>
             <polyline :points="tempPolylinePoints(metricHistory.temp)" class="line temp-line"></polyline>
+            <circle v-for="point in tempChartPoints(metricHistory.temp, metricHistory.labels)" :key="`temp-${point.x}-${point.y}`" class="point temp-point" :cx="point.x" :cy="point.y" r="3"><title>{{ point.label }}</title></circle>
           </svg>
           <div class="chips">
             <span v-for="temp in system.temperatures" :key="temp.name">
@@ -175,11 +192,25 @@
         </section>
 
         <section v-if="activeTab === 'resources'" class="card raw-panel">
-          <h2>NPU / RGA 原始输出</h2>
-          <pre class="raw-watch">/sys/kernel/debug/rknpu/load
-{{ system.npu.raw_load || 'N/A' }}</pre>
-          <pre class="raw-watch">/sys/kernel/debug/rkrga/load
-{{ system.rga.debug.raw_load || 'N/A' }}</pre>
+          <h2>NPU / RGA 解析结果</h2>
+          <div class="parsed-grid">
+            <div>
+              <h3>NPU Core 负载</h3>
+              <div v-for="core in system.npu.cores" :key="`parsed-${core.name}`" class="parsed-row">
+                <span>{{ core.name }}</span>
+                <div class="core-bar"><i :style="barStyle(core.load_percent)"></i></div>
+                <b>{{ busyText(core.load_percent) }}</b>
+              </div>
+            </div>
+            <div>
+              <h3>RGA Scheduler 负载</h3>
+              <div v-for="item in system.rga.debug.schedulers" :key="`parsed-${item.name}`" class="parsed-row">
+                <span>{{ item.name }}</span>
+                <div class="core-bar"><i :style="barStyle(item.load_percent)"></i></div>
+                <b>{{ busyText(item.load_percent) }}</b>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section v-if="activeTab === 'cameras'" class="card add-camera">
@@ -277,6 +308,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=resource-svg-charts-20260817"></script>
+    <script src="/static/app.js?v=parsed-npu-rga-autoscale-20260817"></script>
   </body>
 </html>

@@ -498,6 +498,35 @@ def parse_load_percent(text: Optional[str]) -> Optional[float]:
     return round(max(0.0, min(100.0, value)), 1)
 
 
+def parse_npu_cores(raw_load: Optional[str]) -> List[Dict[str, Any]]:
+    if not raw_load:
+        return []
+    cores: List[Dict[str, Any]] = []
+    for match in re.finditer(r"Core(\d+)\s*:\s*(\d+(?:\.\d+)?)\s*%", raw_load):
+        cores.append({
+            "name": f"Core{match.group(1)}",
+            "load_percent": round(float(match.group(2)), 1),
+        })
+    return cores
+
+
+def parse_rga_schedulers(raw_load: Optional[str]) -> List[Dict[str, Any]]:
+    if not raw_load:
+        return []
+    schedulers: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    for line in raw_load.splitlines():
+        scheduler_match = re.search(r"scheduler\[(\d+)\]\s*:\s*(\S+)", line)
+        if scheduler_match:
+            current = {"id": int(scheduler_match.group(1)), "name": scheduler_match.group(2), "load_percent": None}
+            schedulers.append(current)
+            continue
+        load_match = re.search(r"load\s*=\s*(\d+(?:\.\d+)?)\s*%", line)
+        if load_match and current is not None:
+            current["load_percent"] = round(float(load_match.group(1)), 1)
+    return schedulers
+
+
 def devfreq_metric(name_hint: str) -> Optional[Dict[str, Any]]:
     for node in Path("/sys/class/devfreq").glob("*"):
         node_name = (read_text(str(node / "name")) or node.name).lower()
@@ -517,7 +546,8 @@ def devfreq_metric(name_hint: str) -> Optional[Dict[str, Any]]:
 def debug_npu_metric() -> Dict[str, Any]:
     metric = devfreq_metric("npu") or {"name": "npu", "available": False}
     raw_load = read_text_timeout("/sys/kernel/debug/rknpu/load")
-    debug_load = parse_load_percent(raw_load)
+    cores = parse_npu_cores(raw_load)
+    debug_load = max((core["load_percent"] for core in cores), default=None)
     debug_freq = read_int("/sys/kernel/debug/rknpu/freq")
     debug_power = read_text("/sys/kernel/debug/rknpu/power")
     temp = next((item["temp_c"] for item in temperature_metrics() if "npu" in item["name"].lower()), None)
@@ -529,14 +559,19 @@ def debug_npu_metric() -> Dict[str, Any]:
     if debug_power is not None:
         metric["power"] = debug_power
     metric["raw_load"] = raw_load
+    metric["cores"] = cores
     metric["temp_c"] = temp
     return metric
 
 
 def debug_rga_metric() -> Dict[str, Any]:
     raw_load = read_text_timeout("/sys/kernel/debug/rkrga/load")
+    schedulers = parse_rga_schedulers(raw_load)
+    load_percent = max((item["load_percent"] for item in schedulers if item["load_percent"] is not None), default=None)
     return {
         "available": raw_load is not None,
+        "load_percent": load_percent,
+        "schedulers": schedulers,
         "raw_load": raw_load,
     }
 

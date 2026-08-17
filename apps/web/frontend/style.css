@@ -218,6 +218,22 @@ button:disabled {
   font-size: 12px;
 }
 
+.mini-loads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.mini-loads span {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-size: 11px;
+  padding: 4px 7px;
+}
+
 .gauge {
   height: 128px;
   width: 128px;
@@ -309,6 +325,38 @@ button:disabled {
   stroke: #f43f5e;
 }
 
+.rga-line {
+  stroke: #a78bfa;
+}
+
+.point {
+  cursor: crosshair;
+  opacity: 0.9;
+  stroke: #020617;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.cpu-point {
+  fill: #22c55e;
+}
+
+.mem-point {
+  fill: #38bdf8;
+}
+
+.npu-point {
+  fill: #f97316;
+}
+
+.rga-point {
+  fill: #a78bfa;
+}
+
+.temp-point {
+  fill: #f43f5e;
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -340,6 +388,10 @@ button:disabled {
 
 .npu-dot::before {
   background: #f97316;
+}
+
+.rga-dot::before {
+  background: #a78bfa;
 }
 
 .core-list {
@@ -412,6 +464,33 @@ button:disabled {
   overflow: auto;
   padding: 10px;
   white-space: pre-wrap;
+}
+
+.parsed-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.parsed-grid h3 {
+  color: #b6c3d1;
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+.parsed-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 92px minmax(120px, 1fr) 62px;
+  margin-bottom: 10px;
+}
+
+.parsed-row span,
+.parsed-row b {
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
 }
 
 .add-camera {
