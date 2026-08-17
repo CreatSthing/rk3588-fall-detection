@@ -88,7 +88,8 @@ h1 {
   margin-bottom: 14px;
 }
 
-input {
+input,
+select {
   background: rgba(2, 6, 23, 0.85);
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 14px;
@@ -124,6 +125,18 @@ button.primary {
   border: 0;
 }
 
+button.danger {
+  background: rgba(127, 29, 29, 0.75);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+}
+
+button.mini {
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -148,6 +161,48 @@ button:disabled {
 
 .metric-row strong {
   font-size: 22px;
+}
+
+.metric-sub {
+  color: #9fb3c8;
+  font-size: 13px;
+  margin: -6px 0 10px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chips span {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.hardware h3 {
+  color: #b6c3d1;
+  font-size: 14px;
+  margin: 14px 0 4px;
+}
+
+.add-camera {
+  grid-column: span 2;
+}
+
+.add-camera-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr 2fr 100px 100px 120px 130px auto;
+}
+
+.add-camera-grid .wide {
+  min-width: 260px;
 }
 
 .error {
@@ -313,12 +368,16 @@ pre {
   }
 
   .camera-grid,
-  .camera-controls {
+  .camera-controls,
+  .add-camera-grid {
     display: block;
   }
 
   .camera-controls input,
-  .camera-controls label {
+  .camera-controls label,
+  .add-camera-grid input,
+  .add-camera-grid select,
+  .add-camera-grid button {
     margin-bottom: 10px;
     width: 100%;
   }

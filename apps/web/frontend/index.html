@@ -47,13 +47,75 @@
         </section>
 
         <section class="card metrics">
-          <h2>说明</h2>
+          <h2>系统监控</h2>
+          <div class="metric-row">
+            <span>CPU 使用率</span>
+            <strong>{{ busyText(system.cpu.usage_percent) }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>内存</span>
+            <strong>{{ fmt(system.memory.used_percent, '%') }}</strong>
+          </div>
+          <div class="metric-sub">
+            {{ fmt(system.memory.used_mb, ' MB') }} /
+            {{ fmt(system.memory.total_mb, ' MB') }}
+          </div>
+          <div class="metric-row">
+            <span>NPU 使用率</span>
+            <strong>{{ busyText(system.npu.load_percent) }}</strong>
+          </div>
+          <div class="metric-sub">
+            NPU 频率：{{ fmt(system.npu.freq_mhz, ' MHz') }}
+          </div>
+          <div class="chips">
+            <span v-for="temp in system.temperatures" :key="temp.name">
+              {{ temp.name }} {{ temp.temp_c }}℃
+            </span>
+          </div>
+        </section>
+
+        <section class="card hardware">
+          <h2>MPP / RGA</h2>
+          <h3>MPP 解码</h3>
+          <div class="chips">
+            <span v-for="item in system.mpp.decoder" :key="item.name">
+              {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
+            </span>
+          </div>
+          <h3>MPP 编码</h3>
+          <div class="chips">
+            <span v-for="item in system.mpp.encoder" :key="item.name">
+              {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
+            </span>
+          </div>
+          <h3>RGA</h3>
+          <div class="chips">
+            <span v-for="item in system.rga.domains" :key="item.name">
+              {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
+            </span>
+            <span v-for="clock in system.rga.clocks" :key="clock.name">
+              {{ clock.name }} {{ clock.available ? fmt(clock.freq_mhz, ' MHz') : 'N/A' }}
+            </span>
+          </div>
+        </section>
+
+        <section class="card add-camera">
+          <h2>添加摄像头</h2>
+          <div class="add-camera-grid">
+            <input v-model="newCamera.id" placeholder="ID，如 cam2" />
+            <input v-model="newCamera.name" placeholder="名称，如 门口摄像头" />
+            <input class="wide" v-model="newCamera.source_url" placeholder="RTSP，如 rtsp://user:pass@ip:554/stream2" />
+            <input v-model.number="newCamera.width" type="number" min="1" placeholder="宽，如 640" />
+            <input v-model.number="newCamera.height" type="number" min="1" placeholder="高，如 360" />
+            <input v-model.number="newCamera.contexts" type="number" min="1" max="20" placeholder="contexts" />
+            <select v-model="newCamera.decoder">
+              <option value="software">software</option>
+              <option value="auto">auto</option>
+            </select>
+            <button class="primary" @click="addCamera">添加</button>
+          </div>
           <p class="hint">
-            每路摄像头独立启动推流和检测。检测框按该路视频真实分辨率缩放；
-            例如 TP-Link 子码流是 640×360，就必须用 640×360 算框，不能用 1920×1080。
-          </p>
-          <p class="hint">
-            多路配置在后端 JSON 的 <code>cameras</code> 数组里维护，每路可以有不同 RTSP、MediaMTX 路径和检测命令。
+            添加后会写入板子本地配置文件；仓库示例不会保存真实密码。
           </p>
         </section>
 
@@ -72,6 +134,7 @@
                 <span :class="{ ok: camera.streaming }">{{ camera.streaming ? '推流中' : '未推流' }}</span>
                 <span :class="{ ok: camera.running }">{{ camera.running ? '检测中' : '未检测' }}</span>
                 <span :class="{ ok: camera.recording }">{{ camera.recording ? '录像中' : '未录像' }}</span>
+                <button class="danger mini" @click="removeCamera(camera)">移除</button>
               </div>
             </div>
 
@@ -132,6 +195,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=multicam-form-fix-20260817"></script>
+    <script src="/static/app.js?v=system-metrics-camera-crud-20260817"></script>
   </body>
 </html>

@@ -5,9 +5,26 @@ createApp({
     const status = reactive({
       cameras: [],
     });
+    const system = reactive({
+      cpu: {},
+      memory: {},
+      temperatures: [],
+      npu: {},
+      mpp: { decoder: [], encoder: [] },
+      rga: { domains: [], clocks: [] },
+    });
     const form = reactive({
       contexts: 8,
       dryRun: false,
+    });
+    const newCamera = reactive({
+      id: "",
+      name: "",
+      source_url: "",
+      width: 640,
+      height: 360,
+      contexts: 8,
+      decoder: "software",
     });
     const wsConnected = ref(false);
     const message = ref("");
@@ -105,6 +122,15 @@ createApp({
       applyStatus(await response.json());
     }
 
+    async function refreshSystemMetrics() {
+      try {
+        const response = await fetch("/api/system/metrics");
+        Object.assign(system, await response.json());
+      } catch (err) {
+        appendLog(`刷新系统监控失败：${err.message}`);
+      }
+    }
+
     async function startPipeline(camera) {
       const item = camera.form || formForCamera(camera.id);
       try {
@@ -139,8 +165,57 @@ createApp({
       await callApi(`/api/cameras/${camera.id}/stream/stop`);
     }
 
+    async function addCamera() {
+      try {
+        await callApi("/api/cameras", {
+          id: newCamera.id.trim(),
+          name: newCamera.name.trim(),
+          source_url: newCamera.source_url.trim(),
+          width: Number(newCamera.width) || 640,
+          height: Number(newCamera.height) || 360,
+          contexts: Number(newCamera.contexts) || 8,
+          decoder: newCamera.decoder || "software",
+        });
+        newCamera.id = "";
+        newCamera.name = "";
+        newCamera.source_url = "";
+        newCamera.width = 640;
+        newCamera.height = 360;
+        newCamera.contexts = 8;
+        newCamera.decoder = "software";
+      } catch (err) {
+        message.value = err.message;
+        appendLog(`添加摄像头失败：${err.message}`);
+      }
+    }
+
+    async function removeCamera(camera) {
+      if (!confirm(`确定移除摄像头 ${camera.id}？请先停止该路推流/检测/录像。`)) return;
+      try {
+        const response = await fetch(`/api/cameras/${camera.id}`, { method: "DELETE" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "请求失败");
+        message.value = payload.message || "已移除";
+        appendLog(message.value);
+        await refreshStatus();
+      } catch (err) {
+        message.value = err.message;
+        appendLog(`移除摄像头失败：${err.message}`, camera.id);
+      }
+    }
+
     function latestDetections(camera) {
       return camera.last_result?.detections || [];
+    }
+
+    function fmt(value, suffix = "") {
+      if (value === null || value === undefined || value === "") return "N/A";
+      return `${value}${suffix}`;
+    }
+
+    function busyText(value) {
+      if (value === null || value === undefined) return "采样中";
+      return `${value}%`;
     }
 
     function boxStyle(camera, box = {}) {
@@ -160,25 +235,33 @@ createApp({
 
     onMounted(() => {
       refreshStatus();
+      refreshSystemMetrics();
       connectWs();
       setInterval(refreshStatus, 3000);
+      setInterval(refreshSystemMetrics, 2000);
     });
 
     return {
       status,
+      system,
       form,
+      newCamera,
       wsConnected,
       message,
       logs,
       totalRunning,
       totalStreaming,
       latestDetections,
+      fmt,
+      busyText,
       startPipeline,
       stopPipeline,
       startRecording,
       stopRecording,
       startStream,
       stopStream,
+      addCamera,
+      removeCamera,
       boxStyle,
     };
   },

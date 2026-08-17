@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import random
+import re
 import signal
 import shutil
 import time
@@ -35,6 +36,16 @@ class CommandResponse(BaseModel):
     message: str
 
 
+class CameraUpsertRequest(BaseModel):
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,32}$")
+    name: str = ""
+    source_url: str = Field(min_length=1)
+    width: int = Field(default=640, ge=1, le=7680)
+    height: int = Field(default=360, ge=1, le=4320)
+    contexts: int = Field(default=8, ge=1, le=20)
+    decoder: str = "software"
+
+
 @dataclass
 class CameraRuntime:
     camera_id: str
@@ -58,6 +69,8 @@ class CameraRuntime:
 class RuntimeState:
     cameras: Dict[str, CameraRuntime] = field(default_factory=dict)
     clients: Set[WebSocket] = field(default_factory=set)
+    last_cpu_sample: Optional[Dict[str, int]] = None
+    last_domain_samples: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 
 state = RuntimeState()
@@ -78,6 +91,20 @@ def load_config() -> Dict[str, Any]:
         return {}
     with config_path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def config_path() -> Path:
+    return Path(os.getenv("RK3588_WEB_CONFIG", str(DEFAULT_CONFIG_PATH)))
+
+
+def save_config(config: Dict[str, Any]) -> None:
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    tmp_path.replace(path)
 
 
 def normalize_camera_config(config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -114,6 +141,37 @@ def camera_configs() -> Dict[str, Dict[str, Any]]:
         normalized.setdefault("hls_url", f"/live/{camera_id}/index.m3u8")
         configs[camera_id] = normalized
     return configs
+
+
+def make_camera_config(request: CameraUpsertRequest) -> Dict[str, Any]:
+    camera_id = request.id
+    mediamtx_path = f"/live/{camera_id}"
+    return {
+        "id": camera_id,
+        "name": request.name or camera_id,
+        "width": request.width,
+        "height": request.height,
+        "source_url": request.source_url,
+        "player_url": mediamtx_path,
+        "rtsp_url": f"rtsp://127.0.0.1:8554{mediamtx_path}",
+        "hls_url": f"{mediamtx_path}/index.m3u8",
+        "stream_command": [
+            "/opt/rk3588-camera/current/deploy/run_gst_mpp_stream.sh",
+            request.source_url,
+            f"rtsp://127.0.0.1:8554{mediamtx_path}",
+        ],
+        "pipeline_command": [
+            "/opt/rk3588-camera/current/bin/yolov5_thread_pool",
+            "/opt/rk3588-camera/current/assets/weights/yolov5s_raw_heads_int8.rknn",
+            f"rtsp://127.0.0.1:8554{mediamtx_path}",
+            str(request.contexts),
+            "0",
+            request.decoder,
+            f"/tmp/web_pipeline_{camera_id}.frames.csv",
+            "1",
+        ],
+        "record_command": [],
+    }
 
 
 def get_camera_config(camera_id: str) -> Dict[str, Any]:
@@ -312,6 +370,171 @@ async def stop_process(process: Optional[asyncio.subprocess.Process]) -> None:
         await process.wait()
 
 
+def read_text(path: str) -> Optional[str]:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+
+
+def read_int(path: str) -> Optional[int]:
+    text = read_text(path)
+    if text is None:
+        return None
+    match = re.search(r"-?\d+", text)
+    return int(match.group(0)) if match else None
+
+
+def parse_cpu_stat() -> Optional[Dict[str, int]]:
+    text = read_text("/proc/stat")
+    if not text:
+        return None
+    first = text.splitlines()[0].split()
+    if not first or first[0] != "cpu":
+        return None
+    values = [int(value) for value in first[1:]]
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    total = sum(values)
+    return {"total": total, "idle": idle}
+
+
+def cpu_usage_percent() -> Optional[float]:
+    current = parse_cpu_stat()
+    previous = state.last_cpu_sample
+    state.last_cpu_sample = current
+    if not current or not previous:
+        return None
+    total_delta = current["total"] - previous["total"]
+    idle_delta = current["idle"] - previous["idle"]
+    if total_delta <= 0:
+        return None
+    return round(max(0.0, min(100.0, (1.0 - idle_delta / total_delta) * 100.0)), 1)
+
+
+def memory_metrics() -> Dict[str, Any]:
+    values: Dict[str, int] = {}
+    text = read_text("/proc/meminfo") or ""
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            values[parts[0].rstrip(":")] = int(parts[1])
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable")
+    used = total - available if total is not None and available is not None else None
+    percent = round(used / total * 100.0, 1) if total and used is not None else None
+    return {
+        "total_mb": round(total / 1024, 1) if total else None,
+        "available_mb": round(available / 1024, 1) if available else None,
+        "used_mb": round(used / 1024, 1) if used is not None else None,
+        "used_percent": percent,
+    }
+
+
+def temperature_metrics() -> List[Dict[str, Any]]:
+    temps: List[Dict[str, Any]] = []
+    for zone in sorted(Path("/sys/class/thermal").glob("thermal_zone*")):
+        name = read_text(str(zone / "type"))
+        raw_temp = read_int(str(zone / "temp"))
+        if not name or raw_temp is None:
+            continue
+        temps.append({"name": name, "temp_c": round(raw_temp / 1000.0, 1)})
+    return temps
+
+
+def parse_load_percent(text: Optional[str]) -> Optional[float]:
+    if not text:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    value = float(match.group(1))
+    return round(max(0.0, min(100.0, value)), 1)
+
+
+def devfreq_metric(name_hint: str) -> Optional[Dict[str, Any]]:
+    for node in Path("/sys/class/devfreq").glob("*"):
+        node_name = (read_text(str(node / "name")) or node.name).lower()
+        if name_hint not in node_name and name_hint not in node.name.lower():
+            continue
+        cur_freq = read_int(str(node / "cur_freq"))
+        load = parse_load_percent(read_text(str(node / "load")))
+        return {
+            "name": node_name,
+            "load_percent": load,
+            "freq_mhz": round(cur_freq / 1_000_000, 1) if cur_freq else None,
+            "available": True,
+        }
+    return None
+
+
+def debug_npu_metric() -> Dict[str, Any]:
+    metric = devfreq_metric("npu") or {"name": "npu", "available": False}
+    debug_load = parse_load_percent(read_text("/sys/kernel/debug/rknpu/load"))
+    debug_freq = read_int("/sys/kernel/debug/rknpu/freq")
+    debug_power = read_text("/sys/kernel/debug/rknpu/power")
+    if debug_load is not None:
+        metric["load_percent"] = debug_load
+        metric["available"] = True
+    if debug_freq is not None:
+        metric["freq_mhz"] = round(debug_freq / 1_000_000, 1) if debug_freq > 100000 else debug_freq
+    if debug_power is not None:
+        metric["power"] = debug_power
+    return metric
+
+
+def domain_busy_percent(domain: str) -> Dict[str, Any]:
+    active = read_int(f"/sys/kernel/debug/pm_genpd/{domain}/active_time")
+    idle = read_int(f"/sys/kernel/debug/pm_genpd/{domain}/total_idle_time")
+    if active is None or idle is None:
+        return {"name": domain, "available": False, "busy_percent": None}
+    current = {"active": active, "idle": idle}
+    previous = state.last_domain_samples.get(domain)
+    state.last_domain_samples[domain] = current
+    busy = None
+    if previous:
+        active_delta = active - previous["active"]
+        idle_delta = idle - previous["idle"]
+        total_delta = active_delta + idle_delta
+        if total_delta > 0:
+            busy = round(max(0.0, min(100.0, active_delta / total_delta * 100.0)), 1)
+    return {
+        "name": domain,
+        "available": True,
+        "busy_percent": busy,
+        "active_time": active,
+        "idle_time": idle,
+    }
+
+
+def clock_metric(clock_name: str) -> Dict[str, Any]:
+    rate = read_int(f"/sys/kernel/debug/clk/{clock_name}/clk_rate")
+    enabled = read_int(f"/sys/kernel/debug/clk/{clock_name}/clk_enable_count")
+    return {
+        "name": clock_name,
+        "available": rate is not None or enabled is not None,
+        "freq_mhz": round(rate / 1_000_000, 1) if rate else None,
+        "enable_count": enabled,
+    }
+
+
+def system_metrics() -> Dict[str, Any]:
+    return {
+        "timestamp": time.time(),
+        "cpu": {"usage_percent": cpu_usage_percent()},
+        "memory": memory_metrics(),
+        "temperatures": temperature_metrics(),
+        "npu": debug_npu_metric(),
+        "mpp": {
+            "decoder": [domain_busy_percent("rkvdec0"), domain_busy_percent("rkvdec1")],
+            "encoder": [domain_busy_percent("venc0"), domain_busy_percent("venc1")],
+        },
+        "rga": {
+            "domains": [domain_busy_percent("rga30"), domain_busy_percent("rga31")],
+            "clocks": [clock_metric("clk_rga3_0_core"), clock_metric("clk_rga3_1_core")],
+        },
+    }
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
@@ -325,6 +548,58 @@ async def get_status() -> Dict[str, Any]:
 @app.get("/api/cameras")
 async def get_cameras() -> Dict[str, Any]:
     return {"cameras": public_state()["cameras"]}
+
+
+@app.get("/api/system/metrics")
+async def get_system_metrics() -> Dict[str, Any]:
+    return system_metrics()
+
+
+@app.post("/api/cameras", response_model=CommandResponse)
+async def add_camera(request: CameraUpsertRequest) -> CommandResponse:
+    config = load_config()
+    cameras = list(normalize_camera_config(config))
+    if any(str(camera.get("id")) == request.id for camera in cameras):
+        raise HTTPException(status_code=409, detail=f"camera already exists: {request.id}")
+    cameras.append(make_camera_config(request))
+    config["cameras"] = cameras
+    save_config(config)
+    await broadcast({"type": "status", "payload": public_state()})
+    return CommandResponse(ok=True, message=f"camera added: {request.id}")
+
+
+@app.put("/api/cameras/{camera_id}", response_model=CommandResponse)
+async def update_camera(camera_id: str, request: CameraUpsertRequest) -> CommandResponse:
+    if request.id != camera_id:
+        raise HTTPException(status_code=400, detail="camera id in path and body must match")
+    config = load_config()
+    cameras = list(normalize_camera_config(config))
+    for index, camera in enumerate(cameras):
+        if str(camera.get("id")) == camera_id:
+            cameras[index] = make_camera_config(request)
+            config["cameras"] = cameras
+            save_config(config)
+            await broadcast({"type": "status", "payload": public_state()})
+            return CommandResponse(ok=True, message=f"camera updated: {camera_id}")
+    raise HTTPException(status_code=404, detail=f"camera not found: {camera_id}")
+
+
+@app.delete("/api/cameras/{camera_id}", response_model=CommandResponse)
+async def remove_camera(camera_id: str) -> CommandResponse:
+    runtime = get_camera_state(camera_id)
+    streaming = runtime.stream_process is not None and runtime.stream_process.returncode is None
+    if runtime.running or streaming or runtime.recording:
+        raise HTTPException(status_code=409, detail="stop stream/pipeline/recording before removing camera")
+    config = load_config()
+    cameras = list(normalize_camera_config(config))
+    kept = [camera for camera in cameras if str(camera.get("id")) != camera_id]
+    if len(kept) == len(cameras):
+        raise HTTPException(status_code=404, detail=f"camera not found: {camera_id}")
+    config["cameras"] = kept
+    save_config(config)
+    state.cameras.pop(camera_id, None)
+    await broadcast({"type": "status", "payload": public_state()})
+    return CommandResponse(ok=True, message=f"camera removed: {camera_id}")
 
 
 @app.post("/api/cameras/{camera_id}/pipeline/start", response_model=CommandResponse)
