@@ -45,7 +45,7 @@ cd /opt/rk3588-camera/current
   --decoder ffmpeg-software
 ```
 
-当前 Orange Pi 镜像的 RKMPP/RGA 对640×360流存在步长转换错误，因此网络流显式使用 FFmpeg 软件解码；实测仍可达到约17～18 FPS。
+当前 Orange Pi 镜像的 RKMPP/RGA 对640×360流存在步长转换错误，因此网络流显式使用 FFmpeg 软件解码；实测仍可达到约17～20 FPS。
 
 `config.example.json` 已将新增摄像头的默认 pipeline 指向该程序。`pipeline_command` 支持 `{source}`、`{camera_id}` 和 `{contexts}` 占位符。
 
