@@ -40,6 +40,21 @@ def box_iou(left: Box, right: Box) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+def normalized_center_distance(left: Box, right: Box) -> float:
+    """Center distance normalized by the larger person-box diagonal.
+
+    A falling person's box changes from tall to wide in only a few frames. IoU
+    alone often drops below the tracking threshold at exactly that moment, so
+    this second metric preserves the identity while the center is still nearby.
+    """
+
+    lx, ly, lw, lh = left
+    rx, ry, rw, rh = right
+    distance = math.hypot((lx + lw / 2) - (rx + rw / 2), (ly + lh / 2) - (ry + rh / 2))
+    scale = max(math.hypot(lw, lh), math.hypot(rw, rh), 1.0)
+    return distance / scale
+
+
 class SimplePoseTracker:
     """Small greedy IoU tracker suitable for a fixed indoor camera.
 
@@ -47,9 +62,10 @@ class SimplePoseTracker:
     keeping the same PoseDetection/track_id contract.
     """
 
-    def __init__(self, iou_threshold: float = 0.25, max_missed: int = 15):
+    def __init__(self, iou_threshold: float = 0.25, max_missed: int = 15, center_threshold: float = 0.7):
         self.iou_threshold = iou_threshold
         self.max_missed = max_missed
+        self.center_threshold = center_threshold
         self.next_id = 1
         self.tracks: Dict[int, Track] = {}
 
@@ -58,13 +74,15 @@ class SimplePoseTracker:
         candidates: List[Tuple[float, int, int]] = []
         for track_id, track in self.tracks.items():
             for detection_index, detection in enumerate(detections):
-                candidates.append((box_iou(track.detection.box, detection.box), track_id, detection_index))
+                iou = box_iou(track.detection.box, detection.box)
+                center_distance = normalized_center_distance(track.detection.box, detection.box)
+                if iou >= self.iou_threshold or center_distance <= self.center_threshold:
+                    score = iou + 0.35 * max(0.0, 1.0 - center_distance)
+                    candidates.append((score, track_id, detection_index))
 
         matched_tracks = set()
         matched_detections = set()
-        for iou, track_id, detection_index in sorted(candidates, reverse=True):
-            if iou < self.iou_threshold:
-                break
+        for _, track_id, detection_index in sorted(candidates, reverse=True):
             if track_id in matched_tracks or detection_index in matched_detections:
                 continue
             detection = detections[detection_index]
@@ -118,6 +136,20 @@ class FallDetector:
     RIGHT_SHOULDER = 6
     LEFT_HIP = 11
     RIGHT_HIP = 12
+    LEFT_KNEE = 13
+    RIGHT_KNEE = 14
+    LEFT_ANKLE = 15
+    RIGHT_ANKLE = 16
+
+    ACTION_LABELS = {
+        "standing": "站立",
+        "walking": "行走",
+        "sitting": "坐姿",
+        "lying_down": "躺卧",
+        "stand_up": "起身",
+        "sit_down": "落座",
+        "fall_down": "跌倒",
+    }
 
     def __init__(
         self,
@@ -125,7 +157,7 @@ class FallDetector:
         recover_seconds: float = 2.0,
         cooldown_seconds: float = 30.0,
         keypoint_threshold: float = 0.25,
-        descent_threshold: float = 0.45,
+        descent_threshold: float = 0.22,
     ):
         self.confirm_seconds = confirm_seconds
         self.recover_seconds = recover_seconds
@@ -133,7 +165,7 @@ class FallDetector:
         self.keypoint_threshold = keypoint_threshold
         self.descent_threshold = descent_threshold
         self.states: Dict[int, FallState] = {}
-        self.history: Dict[int, Deque[Tuple[float, float, float]]] = {}
+        self.history: Dict[int, Deque[Tuple[float, float, float, float]]] = {}
 
     def _center(self, keypoints: Sequence[Keypoint], first: int, second: int) -> Optional[Tuple[float, float]]:
         if len(keypoints) <= max(first, second):
@@ -143,6 +175,20 @@ class FallDetector:
         if not valid:
             return None
         return sum(point[0] for point in valid) / len(valid), sum(point[1] for point in valid) / len(valid)
+
+    def _joint_angle(self, keypoints: Sequence[Keypoint], hip_index: int, knee_index: int, ankle_index: int) -> Optional[float]:
+        if len(keypoints) <= max(hip_index, knee_index, ankle_index):
+            return None
+        hip = keypoints[hip_index]
+        knee = keypoints[knee_index]
+        ankle = keypoints[ankle_index]
+        if min(hip[2], knee[2], ankle[2]) < self.keypoint_threshold:
+            return None
+        first = (hip[0] - knee[0], hip[1] - knee[1])
+        second = (ankle[0] - knee[0], ankle[1] - knee[1])
+        denominator = max(math.hypot(*first) * math.hypot(*second), 1e-6)
+        cosine = max(-1.0, min(1.0, (first[0] * second[0] + first[1] * second[1]) / denominator))
+        return math.degrees(math.acos(cosine))
 
     def features(self, detection: PoseDetection, timestamp: float) -> Dict[str, float | bool]:
         _, _, width, height = detection.box
@@ -162,16 +208,27 @@ class FallDetector:
 
         track_id = int(detection.track_id or 0)
         samples = self.history.setdefault(track_id, deque(maxlen=45))
-        samples.append((timestamp, hip_y, safe_height))
+        hip_x = hip[0] if hip is not None else detection.box[0] + width * 0.5
+        samples.append((timestamp, hip_x, hip_y, safe_height))
         while samples and timestamp - samples[0][0] > 0.8:
             samples.popleft()
 
         descent_speed = 0.0
+        horizontal_speed = 0.0
         if len(samples) >= 2:
-            old_time, old_y, old_height = samples[0]
+            old_time, old_x, old_y, old_height = samples[0]
             elapsed = timestamp - old_time
             if elapsed >= 0.15:
                 descent_speed = (hip_y - old_y) / max(old_height, safe_height, 1.0) / elapsed
+                horizontal_speed = abs(hip_x - old_x) / max(old_height, safe_height, 1.0) / elapsed
+
+        knee_angles = [
+            angle for angle in (
+                self._joint_angle(detection.keypoints, self.LEFT_HIP, self.LEFT_KNEE, self.LEFT_ANKLE),
+                self._joint_angle(detection.keypoints, self.RIGHT_HIP, self.RIGHT_KNEE, self.RIGHT_ANKLE),
+            ) if angle is not None
+        ]
+        knee_angle = sum(knee_angles) / len(knee_angles) if knee_angles else 180.0
 
         horizontal = torso_angle >= 52.0 or aspect_ratio >= 0.95
         rapid_descent = descent_speed >= self.descent_threshold
@@ -186,12 +243,32 @@ class FallDetector:
             "aspect_ratio": round(aspect_ratio, 3),
             "torso_angle": round(torso_angle, 2),
             "descent_speed": round(descent_speed, 3),
+            "horizontal_speed": round(horizontal_speed, 3),
+            "knee_angle": round(knee_angle, 1),
             "horizontal": horizontal,
             "rapid_descent": rapid_descent,
             "lying": lying,
             "suspicious": suspicious,
             "score": round(score, 3),
         }
+
+    @staticmethod
+    def classify_posture(features: Dict[str, float | bool]) -> str:
+        """Map pose geometry and short motion history into the upstream seven actions."""
+
+        if bool(features["lying"]):
+            return "lying_down"
+        torso_angle = float(features["torso_angle"])
+        vertical_speed = float(features["descent_speed"])
+        if torso_angle >= 28.0 or abs(vertical_speed) >= 0.20:
+            if vertical_speed < -0.05:
+                return "stand_up"
+            return "sit_down"
+        if float(features["knee_angle"]) <= 138.0 or float(features["aspect_ratio"]) >= 0.58:
+            return "sitting"
+        if float(features["horizontal_speed"]) >= 0.12:
+            return "walking"
+        return "standing"
 
     def update(self, detection: PoseDetection, timestamp: Optional[float] = None) -> Tuple[str, Dict[str, object], Optional[Dict[str, object]]]:
         now = time.time() if timestamp is None else timestamp
@@ -250,7 +327,9 @@ class FallDetector:
                         }
                     state.event_id = None
 
-        action = "fall" if state.phase == "fallen" else ("suspected_fall" if state.phase == "candidate" else "normal")
+        action = "fall_down" if state.phase in {"candidate", "fallen"} else self.classify_posture(features)
+        features["fall_state"] = state.phase
+        features["action_label"] = self.ACTION_LABELS[action]
         return action, features, event
 
     def prune(self, active_track_ids: Iterable[int]) -> None:

@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 
 from .heuristics import FallDetector, SimplePoseTracker
-from .video_source import open_video_source
+from .video_source import is_network_source, open_video_source
 from .yolov8_pose_rknn import YoloV8PoseRKNN
 
 
@@ -154,7 +154,10 @@ def detection_json(detection, action: str, features: Dict[str, object]) -> Dict[
         "score": round(detection.score, 4),
         "track_id": detection.track_id,
         "action": action,
+        "action_label": features["action_label"],
+        "fall_state": features["fall_state"],
         "fall_score": features["score"],
+        "pose_features": features,
         "box": {"x": round(x, 1), "y": round(y, 1), "w": round(width, 1), "h": round(height, 1)},
         "keypoints": [
             {"x": round(px, 1), "y": round(py, 1), "score": round(score, 3)}
@@ -178,6 +181,8 @@ def run(args: argparse.Namespace) -> int:
     clip_buffer = EventClipBuffer(output_dir, source_fps, args.pre_event_seconds, args.post_event_seconds)
     frame_id = 0
     started_at = time.monotonic()
+    timeline_started_at = time.time()
+    source_is_live = isinstance(parse_source(args.source), int) or is_network_source(args.source)
 
     try:
         with YoloV8PoseRKNN(
@@ -189,8 +194,8 @@ def run(args: argparse.Namespace) -> int:
                 ok, frame = capture.read()
                 if not ok:
                     break
-                now = time.time()
                 frame_id += 1
+                now = time.time() if source_is_live else timeline_started_at + (frame_id - 1) / max(source_fps, 1.0)
                 clip_updates = clip_buffer.add_frame(now, frame)
                 poses = tracker.update(pose_model.infer(frame), timestamp=now)
                 detections: List[Dict[str, object]] = []
@@ -249,7 +254,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-seconds", type=float, default=0.7)
     parser.add_argument("--recover-seconds", type=float, default=2.0)
     parser.add_argument("--cooldown-seconds", type=float, default=30.0)
-    parser.add_argument("--descent-threshold", type=float, default=0.45)
+    parser.add_argument(
+        "--descent-threshold",
+        type=float,
+        default=0.22,
+        help="normalized hip descent per second; calibrated on the bundled offline fall test",
+    )
     parser.add_argument("--max-frames", type=int, default=0)
     parser.add_argument("--pre-event-seconds", type=float, default=5.0)
     parser.add_argument("--post-event-seconds", type=float, default=10.0)

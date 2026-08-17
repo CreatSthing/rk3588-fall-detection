@@ -38,7 +38,7 @@ class FallDetectorTests(unittest.TestCase):
             action, _, current = detector.update(detection, timestamp)
             actions.append(action)
             event = current or event
-        self.assertEqual("fall", actions[-1])
+        self.assertEqual("fall_down", actions[-1])
         self.assertIsNotNone(event)
         self.assertEqual("confirmed", event["state"])
 
@@ -58,6 +58,31 @@ class FallDetectorTests(unittest.TestCase):
         tracker.update([first], 0.0)
         tracker.update([second], 0.1)
         self.assertEqual(first.track_id, second.track_id)
+
+    def test_tracker_keeps_identity_when_box_rotates_during_fall(self):
+        tracker = SimplePoseTracker(iou_threshold=0.25)
+        upright = PoseDetection((100, 40, 80, 240), 0.9, [])
+        horizontal = PoseDetection((70, 170, 230, 90), 0.9, [])
+        tracker.update([upright], 0.0)
+        tracker.update([horizontal], 0.2)
+        self.assertEqual(upright.track_id, horizontal.track_id)
+
+    def test_exposes_upstream_seven_action_states(self):
+        self.assertEqual(
+            {"standing", "walking", "sitting", "lying_down", "stand_up", "sit_down", "fall_down"},
+            set(FallDetector.ACTION_LABELS),
+        )
+
+    def test_splits_stand_up_and_sit_down_by_vertical_direction(self):
+        base = {
+            "lying": False,
+            "torso_angle": 35.0,
+            "knee_angle": 110.0,
+            "aspect_ratio": 0.7,
+            "horizontal_speed": 0.0,
+        }
+        self.assertEqual("stand_up", FallDetector.classify_posture({**base, "descent_speed": -0.25}))
+        self.assertEqual("sit_down", FallDetector.classify_posture({**base, "descent_speed": 0.25}))
 
     def test_normalizes_board_keypoint_tensor(self):
         output = np.zeros((1, 17, 3, 8400), dtype=np.float32)

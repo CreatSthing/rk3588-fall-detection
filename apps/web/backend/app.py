@@ -382,10 +382,16 @@ async def process_fall_event(camera_id: str, raw_event: Dict[str, Any]) -> Dict[
     event["timestamp"] = float(event.get("timestamp") or time.time())
     event["state"] = str(event.get("state") or "confirmed")
     existing = event_repository().get(event["id"])
-    saved = event_repository().upsert(event)
-
     supplied_video = event.get("video_path")
     supplied_status = event.get("recording_status")
+    # A late "recording ready" update can arrive after the person recovered.
+    # It must update only clip metadata: re-upserting it would also reset the
+    # recovered timestamp to the original fall timestamp.
+    if existing is not None and supplied_status:
+        saved = existing
+    else:
+        saved = event_repository().upsert(event)
+
     if supplied_video and supplied_status in {"recording", "ready", "failed"}:
         saved = event_repository().set_recording(
             event["id"], str(supplied_status), str(supplied_video), event.get("recording_error")

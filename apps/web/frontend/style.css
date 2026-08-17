@@ -965,6 +965,31 @@ button:disabled {
   position: absolute;
 }
 
+.pose-layer {
+  height: 100%;
+  inset: 0;
+  overflow: visible;
+  position: absolute;
+  width: 100%;
+}
+
+.pose-layer line {
+  stroke: #38bdf8;
+  stroke-linecap: round;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.pose-layer circle {
+  fill: #f8fafc;
+  stroke: #0284c7;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.pose-layer .fall-pose line { stroke: #ef4444; }
+.pose-layer .fall-pose circle { fill: #fef2f2; stroke: #dc2626; }
+
 .box {
   border: 2px solid #22c55e;
   border-radius: 8px;

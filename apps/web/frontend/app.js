@@ -490,8 +490,8 @@ createApp({
     }
 
     function boxStyle(camera, box = {}) {
-      const width = Number(camera.width) || 640;
-      const height = Number(camera.height) || 360;
+      const width = Number(camera.last_result?.width || camera.width) || 640;
+      const height = Number(camera.last_result?.height || camera.height) || 360;
       const x = Math.max(0, Number(box.x || 0));
       const y = Math.max(0, Number(box.y || 0));
       const w = Math.max(0, Number(box.w || 0));
@@ -502,6 +502,62 @@ createApp({
         width: `${Math.min(100, (w / width) * 100)}%`,
         height: `${Math.min(100, (h / height) * 100)}%`,
       };
+    }
+
+    function poseViewBox(camera) {
+      const width = Number(camera.last_result?.width || camera.width) || 640;
+      const height = Number(camera.last_result?.height || camera.height) || 360;
+      return `0 0 ${width} ${height}`;
+    }
+
+    const cocoSkeleton = [
+      [0, 1], [0, 2], [1, 3], [2, 4],
+      [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+      [5, 11], [6, 12], [11, 12],
+      [11, 13], [13, 15], [12, 14], [14, 16],
+    ];
+
+    function visibleKeypoints(detection) {
+      return (detection?.keypoints || [])
+        .map((point, index) => ({ ...point, index }))
+        .filter((point) => Number(point.score || 0) >= 0.25);
+    }
+
+    function skeletonLines(detection) {
+      const points = detection?.keypoints || [];
+      return cocoSkeleton.flatMap(([first, second]) => {
+        const left = points[first];
+        const right = points[second];
+        if (!left || !right || Number(left.score || 0) < 0.25 || Number(right.score || 0) < 0.25) return [];
+        return [{ x1: left.x, y1: left.y, x2: right.x, y2: right.y }];
+      });
+    }
+
+    const postureLabels = {
+      standing: "站立",
+      walking: "行走",
+      sitting: "坐姿",
+      lying_down: "躺卧",
+      stand_up: "起身",
+      sit_down: "落座",
+      fall_down: "跌倒",
+      // Compatibility with results produced by an older pipeline during a rolling update.
+      normal: "站立",
+      suspected_fall: "疑似跌倒",
+      fall: "跌倒",
+    };
+
+    function postureLabel(detection) {
+      return detection?.action_label || postureLabels[detection?.action] || "人员";
+    }
+
+    function isFallDetection(detection) {
+      return ["candidate", "fallen"].includes(detection?.fall_state)
+        || ["fall_down", "suspected_fall", "fall"].includes(detection?.action);
+    }
+
+    function detectionConfidence(detection) {
+      return Number(isFallDetection(detection) ? detection?.fall_score : detection?.score) || 0;
     }
 
     onMounted(() => {
@@ -560,6 +616,12 @@ createApp({
       addCamera,
       removeCamera,
       boxStyle,
+      poseViewBox,
+      visibleKeypoints,
+      skeletonLines,
+      postureLabel,
+      isFallDetection,
+      detectionConfidence,
       enableAlarmNotifications,
       acknowledgeAlarm,
       eventTime,

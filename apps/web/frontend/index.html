@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=fall-alarm-20260817" />
+    <link rel="stylesheet" href="/static/style.css?v=pose-seven-20260817-2" />
   </head>
   <body>
     <div id="app" class="page">
@@ -304,14 +304,37 @@
             <div class="video-shell monitor-video">
               <iframe class="video-frame" :src="camera.player_url_abs" allow="autoplay; fullscreen"></iframe>
               <div class="overlay">
+                <svg
+                  class="pose-layer"
+                  :viewBox="poseViewBox(camera)"
+                  preserveAspectRatio="none"
+                >
+                  <g
+                    v-for="(det, detIndex) in latestDetections(camera)"
+                    :key="`pose-${detIndex}`"
+                    :class="{ 'fall-pose': isFallDetection(det) }"
+                  >
+                    <line
+                      v-for="(segment, segmentIndex) in skeletonLines(det)"
+                      :key="`line-${detIndex}-${segmentIndex}`"
+                      :x1="segment.x1" :y1="segment.y1"
+                      :x2="segment.x2" :y2="segment.y2"
+                    ></line>
+                    <circle
+                      v-for="point in visibleKeypoints(det)"
+                      :key="`point-${detIndex}-${point.index}`"
+                      :cx="point.x" :cy="point.y" r="3"
+                    ></circle>
+                  </g>
+                </svg>
                 <div
                   v-for="(det, index) in latestDetections(camera)"
                   :key="index"
                   class="box"
-                  :class="{ fall: det.action === 'fall' || det.action === 'suspected_fall' }"
+                  :class="{ fall: isFallDetection(det) }"
                   :style="boxStyle(camera, det.box)"
                 >
-                  <span>{{ det.action === 'fall' ? '跌倒' : det.label }} {{ Math.round((det.fall_score || det.score || 0) * 100) }}%</span>
+                  <span>{{ postureLabel(det) }} {{ Math.round(detectionConfidence(det) * 100) }}%</span>
                 </div>
               </div>
             </div>
@@ -418,6 +441,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=fall-alarm-20260817"></script>
+    <script src="/static/app.js?v=pose-seven-20260817-2"></script>
   </body>
 </html>

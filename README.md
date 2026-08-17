@@ -5,6 +5,8 @@
 ## 核心功能
 
 - YOLOv8n-Pose RKNN 姿态推理
+- 原项目 7 类动作：站立、行走、坐姿、躺卧、起身、落座、跌倒
+- 浏览器实时绘制 17 个关键点骨架和人员框
 - 多人轻量跟踪与时序跌倒判断
 - WebSocket 实时告警、声音提示和告警确认
 - SQLite 告警记录与录像索引
@@ -23,6 +25,7 @@
 
 部署、接口和现场标定见 [`docs/fall-detection.md`](docs/fall-detection.md)。
 2026-08-17 的 RK3588 实机结果、故障原因和回滚步骤见 [`docs/rk3588-fall-deployment-report-20260817.md`](docs/rk3588-fall-deployment-report-20260817.md)。
+本次骨架、7类动作和真实离线跌倒回放记录见 [`docs/fall-pose-offline-validation-20260817.md`](docs/fall-pose-offline-validation-20260817.md)。
 
 ## 目录结构
 
