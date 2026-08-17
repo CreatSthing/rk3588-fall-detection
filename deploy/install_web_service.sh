@@ -27,24 +27,35 @@ for group_name in video render; do
     fi
 done
 
-install -d -m 0755 "$etc_dir" /var/lib/rk3588-camera /var/log/rk3588-camera
-chown "$service_user:$service_group" /var/lib/rk3588-camera /var/log/rk3588-camera
+install -d -m 0755 "$etc_dir" /var/lib/rk3588-camera /var/lib/rk3588-camera/events /var/log/rk3588-camera
+chown -R "$service_user:$service_group" /var/lib/rk3588-camera /var/log/rk3588-camera
 
 if [ ! -f "$etc_dir/web.env" ]; then
     install -m 0644 "$app_root/deploy/rk3588-web.env.example" "$etc_dir/web.env"
+fi
+if ! grep -q '^RK3588_EVENT_DIR=' "$etc_dir/web.env"; then
+    printf '%s\n' 'RK3588_EVENT_DIR=/var/lib/rk3588-camera/events' >> "$etc_dir/web.env"
+fi
+if ! grep -q '^RK3588_EVENT_DB=' "$etc_dir/web.env"; then
+    printf '%s\n' 'RK3588_EVENT_DB=/var/lib/rk3588-camera/events/events.db' >> "$etc_dir/web.env"
 fi
 
 if [ ! -f "$etc_dir/web.json" ]; then
     install -m 0644 "$app_root/apps/web/backend/config.example.json" "$etc_dir/web.json"
 fi
 
-python3 -m venv "$app_root/.venv"
+python3 -m venv --system-site-packages "$app_root/.venv"
 pip_index=${RK3588_PIP_INDEX_URL:-https://repo.huaweicloud.com/repository/pypi/simple}
 pip_trusted_host=${RK3588_PIP_TRUSTED_HOST:-repo.huaweicloud.com}
 "$app_root/.venv/bin/python" -m pip install \
     -i "$pip_index" \
     --trusted-host "$pip_trusted_host" \
-    -r "$app_root/apps/web/backend/requirements.txt"
+    -r "$app_root/apps/web/backend/requirements.txt" \
+    -r "$app_root/apps/fall_detection/requirements.txt"
+if ! "$app_root/.venv/bin/python" -c 'import cv2, numpy; from rknnlite.api import RKNNLite' >/dev/null 2>&1; then
+    echo "OpenCV or rknn-toolkit-lite2 is missing. Install the board/Runtime-matched packages before deployment." >&2
+    exit 4
+fi
 chmod +x "$app_root/deploy/run_web.sh"
 chown -R "$service_user:$service_group" "$app_root/.venv"
 

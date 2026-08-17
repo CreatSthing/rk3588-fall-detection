@@ -144,6 +144,9 @@ add_library(rknn_engine SHARED src/engine/rknn_engine.cpp)
 target_link_libraries(rknn_engine
     ${RKNN_API_LIB_PATH}
 )
+
+add_executable(rknn_benchmark tools/benchmark_rknn_model.cpp)
+target_link_libraries(rknn_benchmark ${RKNN_API_LIB_PATH})
 # yolov5_lib
 add_library(yolov5_lib SHARED src/yolov5/yolov5.cpp)
 # 链接库
@@ -251,7 +254,7 @@ if(BUILD_STREAM_TARGETS AND BUILD_ZLMEDIAKIT_STREAM_TARGETS)
     )
 endif()
 
-set(RK3588_INSTALL_TARGETS yolov5_img yolov5_video yolov5_thread_pool)
+set(RK3588_INSTALL_TARGETS rknn_benchmark yolov5_img yolov5_video yolov5_thread_pool)
 if(TARGET mpp_dma_rga_probe)
     list(APPEND RK3588_INSTALL_TARGETS mpp_dma_rga_probe)
 endif()

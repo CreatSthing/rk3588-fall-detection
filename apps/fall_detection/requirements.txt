@@ -1,0 +1,3 @@
+numpy>=1.21,<3
+# Prefer the board image's OpenCV build so FFmpeg/GStreamer support is retained.
+# Install the rknn-toolkit-lite2 wheel that exactly matches librknnrt on the RK3588.

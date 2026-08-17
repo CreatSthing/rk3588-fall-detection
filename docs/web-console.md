@@ -6,6 +6,7 @@
 
 - REST API 按摄像头控制检测流程：启动、停止、查询状态、开始录像、停止录像。
 - WebSocket 实时推送检测结果到浏览器。
+- 跌倒告警实时推送、SQLite 持久化、事件确认与录像查看。
 - 前端按 `cameras[]` 多路展示视频和检测框。
 - 前端用 Vue 3 做单页控制台，当前不依赖 Node/Vite 构建链，方便直接部署到 RK3588 板子。
 
@@ -61,7 +62,13 @@ POST /api/pipeline/stop
 POST /api/recording/start
 POST /api/recording/stop
 WS   /ws/detections
+GET  /api/events
+POST /api/cameras/{camera_id}/fall-events
+POST /api/events/{event_id}/acknowledge
+GET  /api/events/{event_id}/video
 ```
+
+跌倒检测与录像的完整说明见 [`fall-detection.md`](fall-detection.md)。
 
 启动检测请求示例：
 

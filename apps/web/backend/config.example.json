@@ -5,6 +5,7 @@
       "name": "TP-Link 子码流",
       "width": 640,
       "height": 360,
+      "contexts": 1,
       "player_url": "/live/cam1",
       "rtsp_url": "rtsp://127.0.0.1:8554/live/cam1",
       "hls_url": "/live/cam1/index.m3u8",
@@ -14,17 +15,20 @@
         "rtsp://127.0.0.1:8554/live/cam1"
       ],
       "pipeline_command": [
-        "/opt/rk3588-camera/current/bin/yolov5_thread_pool",
-        "/opt/rk3588-camera/current/assets/weights/yolov5s_raw_heads_int8.rknn",
-        "rtsp://127.0.0.1:8554/live/cam1",
-        "8",
-        "0",
-        "software",
-        "/tmp/web_pipeline_cam1.frames.csv",
-        "1"
+        "/opt/rk3588-camera/current/.venv/bin/python",
+        "-m",
+        "apps.fall_detection.main",
+        "--model",
+        "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-int8.rknn",
+        "--source",
+        "{source}",
+        "--camera-id",
+        "{camera_id}"
       ],
       "record_command": []
     }
   ],
-  "record_output_dir": "/opt/rk3588-camera/recordings"
+  "record_output_dir": "/var/lib/rk3588-camera/events",
+  "event_recording_enabled": true,
+  "event_record_seconds": 20
 }

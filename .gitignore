@@ -44,6 +44,8 @@ Thumbs.db
 /3rdparty/rga/**/lib/
 
 # Runtime artifacts
+/.runtime/
+/recordings/
 *.log
 core
 core.*

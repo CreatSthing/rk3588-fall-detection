@@ -29,6 +29,8 @@ createApp({
     const wsConnected = ref(false);
     const message = ref("");
     const logs = ref([]);
+    const alarms = ref([]);
+    const alarmSoundEnabled = ref(false);
     const activeTab = ref("cameras");
     const monitorSize = ref(localStorage.getItem("monitorSize") || "medium");
     const monitorSizeOptions = [
@@ -55,6 +57,8 @@ createApp({
 
     const totalRunning = computed(() => status.cameras.filter((camera) => camera.running).length);
     const totalStreaming = computed(() => status.cameras.filter((camera) => camera.streaming).length);
+    const unacknowledgedAlarms = computed(() => alarms.value.filter((event) => !event.acknowledged));
+    const activeAlarm = computed(() => unacknowledgedAlarms.value[0] || null);
 
     function normalizePlayerUrl(url) {
       if (!url) return "";
@@ -101,6 +105,50 @@ createApp({
       camera.frames = payload.completed || payload.frame_id || camera.frames;
     }
 
+    function upsertAlarm(event) {
+      if (!event?.id) return;
+      const index = alarms.value.findIndex((item) => item.id === event.id);
+      if (index >= 0) alarms.value[index] = { ...alarms.value[index], ...event };
+      else alarms.value.unshift(event);
+      alarms.value.sort((left, right) => Number(right.happened_at || 0) - Number(left.happened_at || 0));
+      alarms.value = alarms.value.slice(0, 200);
+    }
+
+    function playAlarmSound() {
+      if (!alarmSoundEnabled.value) return;
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const context = new AudioContext();
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.frequency.value = 880;
+        gain.gain.setValueAtTime(0.12, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.7);
+        oscillator.connect(gain).connect(context.destination);
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.7);
+      } catch (_) {
+        // Visual and system notifications still work when WebAudio is unavailable.
+      }
+    }
+
+    function notifyAlarm(event) {
+      playAlarmSound();
+      if (window.Notification && Notification.permission === "granted") {
+        new Notification("检测到人员跌倒", {
+          body: `${event.camera_id} / 置信度 ${Math.round(Number(event.confidence || 0) * 100)}%`,
+        });
+      }
+    }
+
+    async function enableAlarmNotifications() {
+      alarmSoundEnabled.value = true;
+      if (window.Notification && Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+      message.value = "前端告警声音与系统通知已启用";
+    }
+
     function connectWs() {
       const protocol = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${protocol}://${location.host}/ws/detections`);
@@ -121,6 +169,14 @@ createApp({
           updateCameraDetection(data.camera_id || data.payload.camera_id || "cam1", data.payload);
         } else if (data.type === "log") {
           appendLog(data.payload.message, data.camera_id);
+        } else if (data.type === "alarm_history") {
+          alarms.value = Array.isArray(data.payload?.events) ? data.payload.events : [];
+        } else if (data.type === "alarm") {
+          upsertAlarm(data.payload);
+          notifyAlarm(data.payload);
+          appendLog("检测到人员跌倒，已自动开始事件录像", data.camera_id);
+        } else if (data.type === "alarm_update") {
+          upsertAlarm(data.payload);
         }
       };
     }
@@ -153,6 +209,37 @@ createApp({
       } catch (err) {
         appendLog(`刷新系统监控失败：${err.message}`);
       }
+    }
+
+    async function refreshEvents() {
+      try {
+        const response = await fetch("/api/events?limit=100");
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "读取告警失败");
+        alarms.value = Array.isArray(payload.events) ? payload.events : [];
+      } catch (err) {
+        appendLog(`刷新告警事件失败：${err.message}`);
+      }
+    }
+
+    async function acknowledgeAlarm(event) {
+      try {
+        const response = await fetch(`/api/events/${event.id}/acknowledge`, { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "确认失败");
+        upsertAlarm(payload.event);
+      } catch (err) {
+        appendLog(`确认告警失败：${err.message}`, event.camera_id);
+      }
+    }
+
+    function eventTime(value) {
+      if (!value) return "--";
+      return new Date(Number(value) * 1000).toLocaleString();
+    }
+
+    function eventVideoUrl(event) {
+      return event.video_ready ? `/api/events/${event.id}/video` : "";
     }
 
     function pushMetricHistory(payload) {
@@ -420,9 +507,11 @@ createApp({
     onMounted(() => {
       refreshStatus();
       refreshSystemMetrics();
+      refreshEvents();
       connectWs();
       setInterval(refreshStatus, 3000);
       setInterval(refreshSystemMetrics, 2000);
+      setInterval(refreshEvents, 10000);
     });
 
     return {
@@ -438,6 +527,10 @@ createApp({
       wsConnected,
       message,
       logs,
+      alarms,
+      alarmSoundEnabled,
+      activeAlarm,
+      unacknowledgedAlarms,
       totalRunning,
       totalStreaming,
       latestDetections,
@@ -467,6 +560,10 @@ createApp({
       addCamera,
       removeCamera,
       boxStyle,
+      enableAlarmNotifications,
+      acknowledgeAlarm,
+      eventTime,
+      eventVideoUrl,
     };
   },
 }).mount("#app");

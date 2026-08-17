@@ -11,6 +11,9 @@
 - 基于 ZLMediaKit 的流媒体处理
 - 支持 RKNN 量化与非量化模型
 - 可选的 PC 端 YOLOv5 ONNX 流程测试
+- YOLOv8n-Pose RKNN 跌倒检测、前端实时告警和跌倒前后事件录像
+
+跌倒检测部署和现场标定见 [`docs/fall-detection.md`](docs/fall-detection.md)。
 
 ## 目录结构
 
@@ -77,6 +80,21 @@ cmake --build . -j$(nproc)
 - `yolov5_thread_pool`
 - `yolov5_stream`
 - `yolov5_stream_pool`
+- `rknn_benchmark`
+
+## RKNN 模型测速
+
+`rknn_benchmark` 只测 RKNN 输入、NPU 推理和输出获取，不包含图片解码、YOLO 后处理或画框。默认先预热 10 次，再连续测量 100 次，并输出平均延迟、P50、P95 和等效 FPS：
+
+```bash
+rknn_benchmark model.rknn
+```
+
+也可指定测量次数和预热次数：
+
+```bash
+rknn_benchmark model.rknn 200 20
+```
 
 ## PC 端流程测试
 

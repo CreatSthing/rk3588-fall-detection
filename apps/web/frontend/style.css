@@ -67,6 +67,28 @@ h1 {
   color: #86efac;
 }
 
+.alarm-banner {
+  align-items: center;
+  animation: alarm-pulse 1.4s ease-in-out infinite;
+  background: linear-gradient(135deg, rgba(185, 28, 28, 0.96), rgba(234, 88, 12, 0.92));
+  border: 1px solid rgba(254, 202, 202, 0.65);
+  border-radius: 20px;
+  box-shadow: 0 18px 60px rgba(220, 38, 38, 0.32);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: auto minmax(220px, 1fr) auto auto;
+  margin-bottom: 20px;
+  padding: 16px 18px;
+}
+
+.alarm-banner p { color: #fee2e2; margin: 4px 0 0; }
+.alarm-icon { align-items: center; background: #fff; border-radius: 50%; color: #b91c1c; display: flex; font-size: 24px; font-weight: 900; height: 42px; justify-content: center; width: 42px; }
+.alarm-ack { background: #fff; color: #991b1b; font-weight: 800; }
+
+@keyframes alarm-pulse {
+  50% { box-shadow: 0 20px 72px rgba(239, 68, 68, 0.55); }
+}
+
 .tabs {
   display: flex;
   gap: 10px;
@@ -83,6 +105,19 @@ h1 {
   border-color: transparent;
   box-shadow: 0 14px 40px rgba(20, 184, 166, 0.18);
 }
+
+.tabs .alarm-tab span { background: #ef4444; border-radius: 999px; color: white; display: inline-block; font-size: 12px; margin-left: 6px; min-width: 22px; padding: 2px 7px; }
+.alarm-page { grid-column: span 2; }
+.alarm-list { display: grid; gap: 12px; }
+.alarm-row { align-items: center; background: rgba(127, 29, 29, 0.28); border: 1px solid rgba(248, 113, 113, 0.38); border-radius: 18px; display: grid; gap: 18px; grid-template-columns: 110px minmax(220px, 1fr) auto; padding: 16px; }
+.alarm-row.acknowledged { background: rgba(15, 23, 42, 0.55); border-color: rgba(148, 163, 184, 0.18); }
+.alarm-state, .alarm-detail { display: grid; gap: 5px; }
+.alarm-state b { color: #fca5a5; }
+.alarm-row.acknowledged .alarm-state b { color: #86efac; }
+.alarm-state span, .alarm-detail span, .alarm-detail small, .record-wait { color: #aebed0; }
+.alarm-buttons { align-items: center; display: flex; gap: 10px; }
+.alarm-buttons a { background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(147, 197, 253, 0.4); border-radius: 12px; color: #bfdbfe; padding: 10px 14px; text-decoration: none; }
+.alarm-empty { color: #94a3b8; padding: 50px; text-align: center; }
 
 .grid {
   display: grid;
@@ -952,6 +987,9 @@ button:disabled {
   white-space: nowrap;
 }
 
+.box.fall { border-color: #ef4444; box-shadow: 0 0 32px rgba(239, 68, 68, 0.75); }
+.box.fall span { background: #ef4444; color: #fff; }
+
 .det-list {
   color: #cbd5e1;
   columns: 2;
@@ -985,6 +1023,7 @@ pre {
   }
 
   .hero,
+  .alarm-banner,
   .grid,
   .tabs,
   .monitor-toolbar {
@@ -1035,4 +1074,7 @@ pre {
   .card {
     margin-bottom: 16px;
   }
+
+  .alarm-row { display: block; }
+  .alarm-state, .alarm-detail, .alarm-buttons { margin-bottom: 12px; }
 }

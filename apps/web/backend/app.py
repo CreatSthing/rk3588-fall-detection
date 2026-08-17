@@ -9,6 +9,7 @@ import signal
 import shutil
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -18,6 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+from .events import EventRepository
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -47,6 +50,19 @@ class CameraUpsertRequest(BaseModel):
     decoder: str = "software"
 
 
+class FallEventRequest(BaseModel):
+    id: Optional[str] = None
+    event_type: str = "fall"
+    state: str = Field(default="confirmed", pattern=r"^(confirmed|recovered)$")
+    track_id: Optional[int] = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    timestamp: Optional[float] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+    video_path: Optional[str] = None
+    recording_status: Optional[str] = Field(default=None, pattern=r"^(pending|recording|ready|failed)$")
+    recording_error: Optional[str] = None
+
+
 @dataclass
 class CameraRuntime:
     camera_id: str
@@ -73,9 +89,11 @@ class RuntimeState:
     last_cpu_sample: Optional[Dict[str, int]] = None
     last_cpu_core_samples: Dict[str, Dict[str, int]] = field(default_factory=dict)
     last_domain_samples: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    event_record_tasks: Dict[str, asyncio.Task] = field(default_factory=dict)
 
 
 state = RuntimeState()
+_event_repositories: Dict[str, EventRepository] = {}
 app = FastAPI(title="RK3588 Smart Camera Console", version="0.2.0")
 
 app.add_middleware(
@@ -109,6 +127,24 @@ def save_config(config: Dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
+def event_output_dir() -> Path:
+    configured = os.getenv("RK3588_EVENT_DIR") or load_config().get("record_output_dir")
+    if configured:
+        return Path(str(configured))
+    if os.name == "posix":
+        return Path("/var/lib/rk3588-camera/events")
+    return ROOT_DIR / ".runtime" / "events"
+
+
+def event_repository() -> EventRepository:
+    configured = os.getenv("RK3588_EVENT_DB")
+    path = Path(configured) if configured else event_output_dir() / "events.db"
+    key = str(path.resolve())
+    if key not in _event_repositories:
+        _event_repositories[key] = EventRepository(path)
+    return _event_repositories[key]
+
+
 def normalize_camera_config(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     cameras = config.get("cameras")
     if isinstance(cameras, list) and cameras:
@@ -138,6 +174,7 @@ def camera_configs() -> Dict[str, Dict[str, Any]]:
         normalized.setdefault("name", camera_id)
         normalized.setdefault("width", 640)
         normalized.setdefault("height", 360)
+        normalized.setdefault("contexts", 1)
         normalized.setdefault("player_url", f"/live/{camera_id}")
         normalized.setdefault("rtsp_url", f"rtsp://127.0.0.1:8554/live/{camera_id}")
         normalized.setdefault("hls_url", f"/live/{camera_id}/index.m3u8")
@@ -153,6 +190,7 @@ def make_camera_config(request: CameraUpsertRequest) -> Dict[str, Any]:
         "name": request.name or camera_id,
         "width": request.width,
         "height": request.height,
+        "contexts": request.contexts,
         "source_url": request.source_url,
         "player_url": mediamtx_path,
         "rtsp_url": f"rtsp://127.0.0.1:8554{mediamtx_path}",
@@ -163,14 +201,15 @@ def make_camera_config(request: CameraUpsertRequest) -> Dict[str, Any]:
             f"rtsp://127.0.0.1:8554{mediamtx_path}",
         ],
         "pipeline_command": [
-            "/opt/rk3588-camera/current/bin/yolov5_thread_pool",
-            "/opt/rk3588-camera/current/assets/weights/yolov5s_raw_heads_int8.rknn",
-            f"rtsp://127.0.0.1:8554{mediamtx_path}",
-            str(request.contexts),
-            "0",
-            request.decoder,
-            f"/tmp/web_pipeline_{camera_id}.frames.csv",
-            "1",
+            "/opt/rk3588-camera/current/.venv/bin/python",
+            "-m",
+            "apps.fall_detection.main",
+            "--model",
+            "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-int8.rknn",
+            "--source",
+            "{source}",
+            "--camera-id",
+            "{camera_id}",
         ],
         "record_command": [],
     }
@@ -193,12 +232,21 @@ def build_pipeline_command(camera: Dict[str, Any], request: StartRequest) -> Lis
     command = list(camera.get("pipeline_command") or [])
     if not command:
         raise HTTPException(status_code=400, detail=f"pipeline_command is empty for camera {camera['id']}")
-    if request.source and len(command) >= 3:
+    source = str(request.source or camera.get("rtsp_url") or camera.get("source_url") or "")
+    replacements = {
+        "{source}": source,
+        "{contexts}": str(request.contexts or camera.get("contexts") or 1),
+        "{camera_id}": str(camera["id"]),
+    }
+    had_placeholders = any(str(item) in replacements for item in command)
+    if had_placeholders:
+        command = [replacements.get(str(item), str(item)) for item in command]
+    elif request.source and len(command) >= 3:
         command[2] = request.source
     if request.contexts is not None:
         exe_name = Path(command[0]).name
         context_index = 3 if exe_name == "yolov5_thread_pool" else 4
-        if len(command) > context_index:
+        if not had_placeholders and len(command) > context_index:
             command[context_index] = str(request.contexts)
     stdbuf = shutil.which("stdbuf")
     if stdbuf:
@@ -247,6 +295,128 @@ async def broadcast(event: Dict[str, Any]) -> None:
             dead_clients.append(websocket)
     for websocket in dead_clients:
         state.clients.discard(websocket)
+
+
+def _safe_filename(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)[:80] or "event"
+
+
+def build_event_record_command(camera: Dict[str, Any], output_path: Path, duration: int) -> List[str]:
+    source = str(camera.get("event_record_source") or camera.get("rtsp_url") or camera.get("source_url") or "")
+    configured = list(camera.get("event_record_command") or [])
+    if configured:
+        replacements = {
+            "{source}": source,
+            "{output}": str(output_path),
+            "{duration}": str(duration),
+        }
+        return [replacements.get(str(item), str(item)) for item in configured]
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found and event_record_command is not configured")
+    if not source:
+        raise RuntimeError("camera has no rtsp_url/source_url for event recording")
+    command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    if source.lower().startswith("rtsp://"):
+        command += ["-rtsp_transport", "tcp"]
+    command += [
+        "-i", source,
+        "-t", str(duration),
+        "-map", "0:v:0",
+        "-an",
+        "-c:v", "copy",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    return command
+
+
+async def record_fall_event(event_id: str, camera_id: str) -> None:
+    repository = event_repository()
+    config = load_config()
+    duration = max(3, min(int(config.get("event_record_seconds") or 20), 300))
+    output_dir = event_output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    happened_at = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    output_path = output_dir / f"{happened_at}-{_safe_filename(camera_id)}-{_safe_filename(event_id)}.mp4"
+    try:
+        camera = get_camera_config(camera_id)
+        command = build_event_record_command(camera, output_path, duration)
+        updated = repository.set_recording(event_id, "recording", str(output_path))
+        await broadcast({"type": "alarm_update", "camera_id": camera_id, "payload": updated})
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(ROOT_DIR),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+            message = stderr.decode("utf-8", errors="replace").strip()[-1000:]
+            raise RuntimeError(message or f"event recorder exited with code {process.returncode}")
+        updated = repository.set_recording(event_id, "ready", str(output_path))
+        await broadcast({"type": "alarm_update", "camera_id": camera_id, "payload": updated})
+    except Exception as exc:
+        try:
+            updated = repository.set_recording(event_id, "failed", str(output_path), str(exc))
+            await broadcast({"type": "alarm_update", "camera_id": camera_id, "payload": updated})
+        except KeyError:
+            pass
+        await broadcast({
+            "type": "log",
+            "camera_id": camera_id,
+            "payload": {"level": "error", "message": f"fall recording failed: {exc}"},
+        })
+    finally:
+        state.event_record_tasks.pop(event_id, None)
+
+
+async def process_fall_event(camera_id: str, raw_event: Dict[str, Any]) -> Dict[str, Any]:
+    if str(raw_event.get("event_type") or "fall") != "fall":
+        raise ValueError("only fall events are supported")
+    event = dict(raw_event)
+    event["id"] = str(event.get("id") or uuid.uuid4().hex)
+    event["camera_id"] = camera_id
+    event["timestamp"] = float(event.get("timestamp") or time.time())
+    event["state"] = str(event.get("state") or "confirmed")
+    existing = event_repository().get(event["id"])
+    saved = event_repository().upsert(event)
+
+    supplied_video = event.get("video_path")
+    supplied_status = event.get("recording_status")
+    if supplied_video and supplied_status in {"recording", "ready", "failed"}:
+        saved = event_repository().set_recording(
+            event["id"], str(supplied_status), str(supplied_video), event.get("recording_error")
+        )
+
+    if event["state"] == "confirmed" and existing is None:
+        await broadcast({"type": "alarm", "camera_id": camera_id, "payload": saved})
+        recording_enabled = bool(load_config().get("event_recording_enabled", True))
+        if supplied_video:
+            await broadcast({"type": "alarm_update", "camera_id": camera_id, "payload": saved})
+        elif recording_enabled and event["id"] not in state.event_record_tasks:
+            task = asyncio.create_task(record_fall_event(event["id"], camera_id))
+            state.event_record_tasks[event["id"]] = task
+    elif event["state"] == "recovered" or supplied_status:
+        await broadcast({"type": "alarm_update", "camera_id": camera_id, "payload": saved})
+    return saved
+
+
+async def process_payload_events(camera_id: str, payload: Dict[str, Any]) -> None:
+    events = payload.get("events") or []
+    if not isinstance(events, list):
+        return
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        try:
+            await process_fall_event(camera_id, item)
+        except (TypeError, ValueError) as exc:
+            await broadcast({
+                "type": "log",
+                "camera_id": camera_id,
+                "payload": {"level": "warning", "message": f"invalid fall event: {exc}"},
+            })
 
 
 def parse_pipeline_line(line: str) -> Optional[Dict[str, Any]]:
@@ -308,6 +478,7 @@ async def read_pipeline_output(camera_id: str, process: asyncio.subprocess.Proce
                     runtime.fps = float(payload["fps"])
                 except (TypeError, ValueError):
                     pass
+            await process_payload_events(camera_id, payload)
         elif event["payload"]["level"] == "error":
             runtime.last_error = event["payload"]["message"]
         await broadcast(event)
@@ -355,9 +526,24 @@ async def simulate_detections(camera_id: str) -> None:
             "timestamp": now,
             "fps": round(runtime.fps, 2),
             "detections": detections,
+            "events": [],
         }
+        if runtime.frames % 40 == 12:
+            event_id = uuid.uuid4().hex
+            detections[0]["action"] = "fall"
+            detections[0]["track_id"] = 1
+            result["events"] = [{
+                "id": event_id,
+                "event_type": "fall",
+                "state": "confirmed",
+                "track_id": 1,
+                "confidence": 0.91,
+                "timestamp": now,
+                "details": {"simulation": True},
+            }]
         runtime.last_result = result
         await broadcast({"type": "detection", "camera_id": camera_id, "payload": result})
+        await process_payload_events(camera_id, result)
         await broadcast({"type": "status", "payload": public_state()})
 
 
@@ -651,6 +837,48 @@ async def get_system_metrics() -> Dict[str, Any]:
     return system_metrics()
 
 
+@app.get("/api/events")
+async def get_events(limit: int = 100, camera_id: Optional[str] = None) -> Dict[str, Any]:
+    return {"events": event_repository().list(limit=limit, camera_id=camera_id)}
+
+
+@app.post("/api/cameras/{camera_id}/fall-events")
+async def ingest_fall_event(camera_id: str, request: FallEventRequest) -> Dict[str, Any]:
+    get_camera_config(camera_id)
+    payload = request.dict()
+    payload["id"] = payload.get("id") or uuid.uuid4().hex
+    return {"ok": True, "event": await process_fall_event(camera_id, payload)}
+
+
+@app.post("/api/events/{event_id}/acknowledge")
+async def acknowledge_event(event_id: str) -> Dict[str, Any]:
+    try:
+        event = event_repository().acknowledge(event_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"event not found: {event_id}") from exc
+    await broadcast({"type": "alarm_update", "camera_id": event["camera_id"], "payload": event})
+    return {"ok": True, "event": event}
+
+
+@app.get("/api/events/{event_id}/video")
+async def get_event_video(event_id: str) -> FileResponse:
+    event = event_repository().get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail=f"event not found: {event_id}")
+    if not event.get("video_ready") or not event.get("video_path"):
+        raise HTTPException(status_code=409, detail="event video is not ready")
+    path = Path(str(event["video_path"])).resolve()
+    allowed = event_output_dir().resolve()
+    try:
+        if os.path.commonpath([str(path), str(allowed)]) != str(allowed):
+            raise HTTPException(status_code=403, detail="event video path is outside the recording directory")
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="invalid event video path") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="event video file is missing")
+    return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+
 @app.post("/api/cameras", response_model=CommandResponse)
 async def add_camera(request: CameraUpsertRequest) -> CommandResponse:
     config = load_config()
@@ -863,6 +1091,7 @@ async def detections_socket(websocket: WebSocket) -> None:
     await websocket.accept()
     state.clients.add(websocket)
     await websocket.send_json({"type": "status", "payload": public_state()})
+    await websocket.send_json({"type": "alarm_history", "payload": {"events": event_repository().list(limit=50)}})
     try:
         while True:
             await websocket.receive_text()

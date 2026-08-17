@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=monitor-size-fixed-20260817" />
+    <link rel="stylesheet" href="/static/style.css?v=fall-alarm-20260817" />
   </head>
   <body>
     <div id="app" class="page">
@@ -20,6 +20,16 @@
         </div>
       </header>
 
+      <section v-if="activeAlarm" class="alarm-banner">
+        <div class="alarm-icon">!</div>
+        <div>
+          <strong>检测到人员跌倒</strong>
+          <p>{{ activeAlarm.camera_id }} · {{ eventTime(activeAlarm.happened_at) }} · 置信度 {{ Math.round(Number(activeAlarm.confidence || 0) * 100) }}%</p>
+        </div>
+        <button @click="activeTab = 'alarms'">查看事件</button>
+        <button class="alarm-ack" @click="acknowledgeAlarm(activeAlarm)">确认收到</button>
+      </section>
+
       <nav class="tabs">
         <button :class="{ active: activeTab === 'cameras' }" @click="activeTab = 'cameras'">
           摄像头管理
@@ -27,9 +37,44 @@
         <button :class="{ active: activeTab === 'resources' }" @click="activeTab = 'resources'">
           系统资源监控
         </button>
+        <button class="alarm-tab" :class="{ active: activeTab === 'alarms' }" @click="activeTab = 'alarms'">
+          告警事件 <span v-if="unacknowledgedAlarms.length">{{ unacknowledgedAlarms.length }}</span>
+        </button>
       </nav>
 
       <main class="grid">
+        <section v-if="activeTab === 'alarms'" class="card alarm-page">
+          <div class="section-head">
+            <div>
+              <h2>跌倒告警记录</h2>
+              <p>告警会实时保存；事件录像完成后可直接查看或下载。</p>
+            </div>
+            <button @click="enableAlarmNotifications">
+              {{ alarmSoundEnabled ? '声音与通知已启用' : '启用声音与系统通知' }}
+            </button>
+          </div>
+          <div v-if="!alarms.length" class="alarm-empty">暂无跌倒告警</div>
+          <div v-else class="alarm-list">
+            <article v-for="event in alarms" :key="event.id" class="alarm-row" :class="{ acknowledged: event.acknowledged }">
+              <div class="alarm-state">
+                <b>{{ event.acknowledged ? '已确认' : '待确认' }}</b>
+                <span>{{ event.state === 'recovered' ? '人员已恢复' : '跌倒告警' }}</span>
+              </div>
+              <div class="alarm-detail">
+                <strong>{{ event.camera_id }} / 人员 #{{ event.track_id || '--' }}</strong>
+                <span>{{ eventTime(event.happened_at) }}</span>
+                <small>置信度 {{ Math.round(Number(event.confidence || 0) * 100) }}% · 录像 {{ event.recording_status }}</small>
+                <small v-if="event.recording_error" class="error">{{ event.recording_error }}</small>
+              </div>
+              <div class="alarm-buttons">
+                <a v-if="eventVideoUrl(event)" :href="eventVideoUrl(event)" target="_blank">查看录像</a>
+                <span v-else class="record-wait">{{ event.recording_status === 'failed' ? '录像失败' : '录像生成中' }}</span>
+                <button v-if="!event.acknowledged" class="primary" @click="acknowledgeAlarm(event)">确认收到</button>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section v-if="activeTab === 'resources'" class="card resource-dashboard">
           <div class="section-head">
             <div>
@@ -263,9 +308,10 @@
                   v-for="(det, index) in latestDetections(camera)"
                   :key="index"
                   class="box"
+                  :class="{ fall: det.action === 'fall' || det.action === 'suspected_fall' }"
                   :style="boxStyle(camera, det.box)"
                 >
-                  <span>{{ det.label }} {{ Math.round((det.score || 0) * 100) }}%</span>
+                  <span>{{ det.action === 'fall' ? '跌倒' : det.label }} {{ Math.round((det.fall_score || det.score || 0) * 100) }}%</span>
                 </div>
               </div>
             </div>
@@ -372,6 +418,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=monitor-size-fixed-20260817"></script>
+    <script src="/static/app.js?v=fall-alarm-20260817"></script>
   </body>
 </html>
