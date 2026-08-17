@@ -485,7 +485,7 @@ button:disabled {
 .accelerator-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
 }
 
 .accelerator-group {
@@ -533,6 +533,38 @@ button:disabled {
   color: #cbd5e1;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
+}
+
+.advanced-metrics {
+  background: rgba(2, 6, 23, 0.24);
+  border: 1px dashed rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  margin-top: 18px;
+  padding: 14px 16px;
+}
+
+.advanced-metrics summary {
+  color: #93c5fd;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.advanced-metrics p {
+  color: #9fb3c8;
+  line-height: 1.7;
+  margin: 12px 0;
+}
+
+.advanced-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.advanced-grid h3 {
+  color: #b6c3d1;
+  font-size: 13px;
+  margin: 8px 0;
 }
 
 .chart-tooltip {

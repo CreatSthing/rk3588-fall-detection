@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=monitor-tooltip-grouped-20260817" />
+    <link rel="stylesheet" href="/static/style.css?v=accelerator-friendly-20260817" />
   </head>
   <body>
     <div id="app" class="page">
@@ -178,7 +178,12 @@
         </section>
 
         <section v-if="activeTab === 'resources'" class="card accelerator-panel">
-          <h2>硬件加速器详情</h2>
+          <div class="section-head">
+            <div>
+              <h2>推理 / 图像硬件状态</h2>
+              <p>NPU 负责模型推理；RGA 负责图像缩放、格式转换等图像处理。当前主链路主要看这两块。</p>
+            </div>
+          </div>
           <div class="accelerator-grid">
             <div class="accelerator-group">
               <h3>NPU Core 负载</h3>
@@ -196,32 +201,43 @@
                 <b>{{ busyText(item.load_percent) }}</b>
               </div>
             </div>
-            <div class="accelerator-group">
-              <h3>MPP 解码域</h3>
-              <div v-for="item in system.mpp.decoder" :key="`dec-${item.name}`" class="chip-row">
-                <span>{{ item.name }}</span>
-                <b>{{ item.available ? busyText(item.busy_percent) : 'N/A' }}</b>
-              </div>
-            </div>
-            <div class="accelerator-group">
-              <h3>MPP 编码域</h3>
-              <div v-for="item in system.mpp.encoder" :key="`enc-${item.name}`" class="chip-row">
-                <span>{{ item.name }}</span>
-                <b>{{ item.available ? busyText(item.busy_percent) : 'N/A' }}</b>
-              </div>
-            </div>
-            <div class="accelerator-group accelerator-wide">
-              <h3>RGA 时钟 / 电源域</h3>
-              <div class="chips">
-                <span v-for="item in system.rga.domains" :key="`domain-${item.name}`">
-                  {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
-                </span>
-                <span v-for="clock in system.rga.clocks" :key="clock.name">
-                  {{ clock.name }} {{ clock.available ? fmt(clock.freq_mhz, ' MHz') : 'N/A' }}
-                </span>
-              </div>
-            </div>
           </div>
+
+          <details class="advanced-metrics">
+            <summary>高级调试：VPU/MPP 与 RGA 底层状态</summary>
+            <p>
+              VPU/MPP 是视频编解码硬件。当前摄像头子码流是 H.264 且直接转推，检测侧走软件解码，
+              所以 VPU/MPP 解码、编码为 0 是正常的；只有切到 MPP 硬解码/硬编码链路时这里才会明显变化。
+              RGA 时钟只说明硬件时钟配置，不等价于业务负载。
+            </p>
+            <div class="advanced-grid">
+              <div>
+                <h3>VPU/MPP 解码</h3>
+                <div v-for="item in system.mpp.decoder" :key="`dec-${item.name}`" class="chip-row">
+                  <span>{{ item.name }}</span>
+                  <b>{{ item.available ? busyText(item.busy_percent) : 'N/A' }}</b>
+                </div>
+              </div>
+              <div>
+                <h3>VPU/MPP 编码</h3>
+                <div v-for="item in system.mpp.encoder" :key="`enc-${item.name}`" class="chip-row">
+                  <span>{{ item.name }}</span>
+                  <b>{{ item.available ? busyText(item.busy_percent) : 'N/A' }}</b>
+                </div>
+              </div>
+              <div>
+                <h3>RGA 电源域 / 时钟</h3>
+                <div class="chips">
+                  <span v-for="item in system.rga.domains" :key="`domain-${item.name}`">
+                    {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
+                  </span>
+                  <span v-for="clock in system.rga.clocks" :key="clock.name">
+                    {{ clock.name }} {{ clock.available ? fmt(clock.freq_mhz, ' MHz') : 'N/A' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </details>
         </section>
 
         <div v-if="chartTooltip.visible" class="chart-tooltip" :style="tooltipStyle()">
@@ -323,6 +339,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=monitor-tooltip-grouped-20260817"></script>
+    <script src="/static/app.js?v=accelerator-friendly-20260817"></script>
   </body>
 </html>
