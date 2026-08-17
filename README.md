@@ -1,8 +1,17 @@
-# RK3588 YOLOv5 Stream
+# RK3588 Fall Detection
 
-面向 Rockchip RK3588 的实时目标检测示例工程。项目使用 RKNN Runtime 运行 YOLOv5 模型，并结合 MPP、RGA、OpenCV、FFmpeg 与 ZLMediaKit 完成图像/视频解码、推理、绘制、编码和视频流处理。
+面向 Rockchip RK3588 的实时跌倒检测工程。系统使用 YOLOv8n-Pose RKNN 获取人体关键点，通过轻量跟踪和时序状态机判断跌倒，并将告警实时推送到浏览器，同时保存跌倒前后的事件录像。仓库保留原 YOLOv5 流媒体流水线，作为 RK3588 解码、推理、编码和推流基础。
 
-## 功能
+## 核心功能
+
+- YOLOv8n-Pose RKNN 姿态推理
+- 多人轻量跟踪与时序跌倒判断
+- WebSocket 实时告警、声音提示和告警确认
+- SQLite 告警记录与录像索引
+- 默认保存跌倒前 5 秒、后 10 秒事件录像
+- FFmpeg RTSP 兜底录像
+
+## 原有媒体能力
 
 - 单张图片 YOLOv5 推理
 - 本地视频目标检测
@@ -11,9 +20,8 @@
 - 基于 ZLMediaKit 的流媒体处理
 - 支持 RKNN 量化与非量化模型
 - 可选的 PC 端 YOLOv5 ONNX 流程测试
-- YOLOv8n-Pose RKNN 跌倒检测、前端实时告警和跌倒前后事件录像
 
-跌倒检测部署和现场标定见 [`docs/fall-detection.md`](docs/fall-detection.md)。
+部署、接口和现场标定见 [`docs/fall-detection.md`](docs/fall-detection.md)。
 
 ## 目录结构
 
@@ -25,7 +33,9 @@
 │   ├── thread_pool_demo/ # 多线程检测入口
 │   ├── stream_demo/      # 原始流处理入口
 │   ├── stream_pipeline/  # Pipeline 化实时流处理入口
-│   └── pc_yolov5/        # PC 端 OpenCV DNN 测试入口
+│   ├── pc_yolov5/        # PC 端 OpenCV DNN 测试入口
+│   ├── fall_detection/   # 姿态推理、跟踪、跌倒判断与事件录像
+│   └── web/              # 告警后端与浏览器前端
 ├── src/
 │   ├── engine/          # 推理引擎抽象和 RKNN 实现
 │   ├── process/         # YOLOv5 前处理和后处理
