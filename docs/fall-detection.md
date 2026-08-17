@@ -1,5 +1,7 @@
 # RK3588 跌倒检测、告警与事件录像
 
+2026-08-17 实机部署、问题分析、校验值和回滚记录见 [`rk3588-fall-deployment-report-20260817.md`](rk3588-fall-deployment-report-20260817.md)。
+
 ## 整体链路
 
 ```text
@@ -29,7 +31,7 @@ python3 tools/convert_yolov8_pose_onnx_to_rknn.py \
   assets/weights/yolov8n-pose-int8.rknn
 ```
 
-3. 确保转换使用的 RKNN-Toolkit2、板端 `librknnrt.so` 和 `rknn-toolkit-lite2` 来自同一版本。
+3. 确保转换使用的 RKNN-Toolkit2、板端 `librknnrt.so` 和 `rknn-toolkit-lite2` 来自同一版本。本次实机统一使用2.3.2；完整校验值见 `deploy/fall-model-manifest.json`。
 
 ## 启动姿态检测程序
 
@@ -39,8 +41,11 @@ cd /opt/rk3588-camera/current
   --model assets/weights/yolov8n-pose-int8.rknn \
   --source rtsp://127.0.0.1:8554/live/cam1 \
   --camera-id cam1 \
-  --event-dir /var/lib/rk3588-camera/events
+  --event-dir /var/lib/rk3588-camera/events \
+  --decoder ffmpeg-software
 ```
+
+当前 Orange Pi 镜像的 RKMPP/RGA 对640×360流存在步长转换错误，因此网络流显式使用 FFmpeg 软件解码；实测仍可达到约17～18 FPS。
 
 `config.example.json` 已将新增摄像头的默认 pipeline 指向该程序。`pipeline_command` 支持 `{source}`、`{camera_id}` 和 `{contexts}` 占位符。
 

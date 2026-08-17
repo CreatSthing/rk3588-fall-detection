@@ -22,6 +22,7 @@
 - 可选的 PC 端 YOLOv5 ONNX 流程测试
 
 部署、接口和现场标定见 [`docs/fall-detection.md`](docs/fall-detection.md)。
+2026-08-17 的 RK3588 实机结果、故障原因和回滚步骤见 [`docs/rk3588-fall-deployment-report-20260817.md`](docs/rk3588-fall-deployment-report-20260817.md)。
 
 ## 目录结构
 
