@@ -154,7 +154,9 @@ class YoloV8PoseRKNN:
     def infer(self, image: np.ndarray) -> List[PoseDetection]:
         model_image, scale, offset_x, offset_y = self._letterbox(image)
         rgb = cv2.cvtColor(model_image, cv2.COLOR_BGR2RGB)
-        outputs = self.rknn.inference(inputs=[rgb])
+        outputs = self.rknn.inference(inputs=[rgb[np.newaxis, ...]], data_format=["nhwc"])
+        if outputs is None:
+            raise RuntimeError("RKNN inference returned no outputs")
         boxes, scores, keypoints = self._decode(outputs)
         image_height, image_width = image.shape[:2]
         detections: List[PoseDetection] = []
