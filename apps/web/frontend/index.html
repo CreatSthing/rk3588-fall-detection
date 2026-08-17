@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=monitor-primary-20260817" />
+    <link rel="stylesheet" href="/static/style.css?v=monitor-size-20260817" />
   </head>
   <body>
     <div id="app" class="page">
@@ -219,7 +219,24 @@
           {{ chartTooltip.text }}
         </div>
 
-        <section v-if="activeTab === 'cameras'" class="monitor-grid">
+        <section v-if="activeTab === 'cameras'" class="card monitor-toolbar">
+          <div>
+            <h2>监控画面</h2>
+            <p>调整播放框显示大小，只影响浏览器布局，不改变检测分辨率。</p>
+          </div>
+          <div class="size-switch">
+            <button
+              v-for="option in monitorSizeOptions"
+              :key="option.value"
+              :class="{ active: monitorSize === option.value }"
+              @click="setMonitorSize(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+        </section>
+
+        <section v-if="activeTab === 'cameras'" class="monitor-grid" :class="monitorGridClass()">
           <article v-for="camera in status.cameras" :key="camera.id" class="card monitor-card">
             <div class="monitor-head">
               <div>
@@ -355,6 +372,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=monitor-primary-20260817"></script>
+    <script src="/static/app.js?v=monitor-size-20260817"></script>
   </body>
 </html>

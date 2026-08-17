@@ -105,6 +105,83 @@ h1 {
   grid-template-columns: repeat(auto-fit, minmax(620px, 1fr));
 }
 
+.monitor-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+  grid-column: span 2;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.monitor-toolbar h2 {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.monitor-toolbar p {
+  color: #9fb3c8;
+  font-size: 13px;
+  margin: 0;
+}
+
+.size-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.size-switch button {
+  border-radius: 999px;
+  padding: 8px 14px;
+}
+
+.size-switch button.active {
+  background: linear-gradient(135deg, #2563eb, #14b8a6);
+  border-color: transparent;
+  box-shadow: 0 10px 28px rgba(20, 184, 166, 0.22);
+}
+
+.monitor-grid.monitor-size-small {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.monitor-grid.monitor-size-medium {
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+}
+
+.monitor-grid.monitor-size-large {
+  grid-template-columns: repeat(auto-fit, minmax(760px, 1fr));
+}
+
+.monitor-grid.monitor-size-full {
+  grid-template-columns: 1fr;
+}
+
+.monitor-size-small .monitor-card {
+  padding: 12px;
+}
+
+.monitor-size-small .monitor-head {
+  align-items: flex-start;
+  display: grid;
+}
+
+.monitor-size-small .monitor-actions {
+  display: block;
+}
+
+.monitor-size-small .camera-debug {
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.monitor-size-large .monitor-card,
+.monitor-size-full .monitor-card {
+  padding: 18px;
+}
+
 .monitor-card {
   padding: 16px;
 }
@@ -874,7 +951,8 @@ pre {
 }
 
 @media (max-width: 1320px) {
-  .monitor-grid {
+  .monitor-grid,
+  .monitor-grid.monitor-size-large {
     grid-template-columns: 1fr;
   }
 
@@ -890,13 +968,19 @@ pre {
 
   .hero,
   .grid,
-  .tabs {
+  .tabs,
+  .monitor-toolbar {
     display: block;
   }
 
   .tabs button {
     margin-bottom: 10px;
     width: 100%;
+  }
+
+  .size-switch {
+    justify-content: flex-start;
+    margin-top: 12px;
   }
 
   .section-head,

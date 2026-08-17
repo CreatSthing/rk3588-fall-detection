@@ -30,6 +30,13 @@ createApp({
     const message = ref("");
     const logs = ref([]);
     const activeTab = ref("cameras");
+    const monitorSize = ref(localStorage.getItem("monitorSize") || "medium");
+    const monitorSizeOptions = [
+      { value: "small", label: "小" },
+      { value: "medium", label: "中" },
+      { value: "large", label: "大" },
+      { value: "full", label: "满宽" },
+    ];
     const chartTooltip = reactive({
       visible: false,
       x: 0,
@@ -378,6 +385,16 @@ createApp({
       chartTooltip.visible = false;
     }
 
+    function setMonitorSize(size) {
+      if (!monitorSizeOptions.some((option) => option.value === size)) return;
+      monitorSize.value = size;
+      localStorage.setItem("monitorSize", size);
+    }
+
+    function monitorGridClass() {
+      return `monitor-size-${monitorSize.value}`;
+    }
+
     function tooltipStyle() {
       return {
         left: `${chartTooltip.x}px`,
@@ -414,6 +431,8 @@ createApp({
       form,
       newCamera,
       activeTab,
+      monitorSize,
+      monitorSizeOptions,
       chartTooltip,
       metricHistory,
       wsConnected,
@@ -436,6 +455,8 @@ createApp({
       tempChartPoints,
       showChartTooltip,
       hideChartTooltip,
+      setMonitorSize,
+      monitorGridClass,
       tooltipStyle,
       startPipeline,
       stopPipeline,
