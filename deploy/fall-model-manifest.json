@@ -1,0 +1,23 @@
+{
+  "model": "yolov8n-pose-int8.rknn",
+  "target": "rk3588",
+  "input_size": [640, 640],
+  "rknn_toolkit2": "2.3.2",
+  "rknn_runtime": "2.3.2",
+  "rknn_model_sha256": "52fb616049eeaea318242ee7972a65d3da7e44cd3d0e9ab8142678dd28523cc3",
+  "onnx_sha256": "308495ebe4416b40adf376485252a7b8ba7933a169368b31e74e0f977ded8663",
+  "runtime_sha256": "d31fc19c85b85f6091b2bd0f6af9d962d5264a4e410bfb536402ec92bac738e8",
+  "rknnlite_wheel_sha256": "4309821b592df85b1fd2a7ff8b863e371ab25d60fca2b86defb8c4542db9d3e9",
+  "calibration": {
+    "images": 40,
+    "source": "installed camera scene",
+    "captured_on": "2026-08-17"
+  },
+  "sources": {
+    "model_zoo_commit": "bad6c7334531becaf90a561988519b7bec34d0ab",
+    "toolkit_commit": "59a913d172e7f5ff03c9076e2ec7b1b1288ffd08",
+    "onnx": "https://ftrg.zbox.filez.com/v2/delivery/data/95f00b0fc900458ba134f8b180b3f7a1/examples/yolov8_pose/yolov8n-pose.onnx",
+    "toolkit": "https://github.com/airockchip/rknn-toolkit2",
+    "model_zoo": "https://github.com/airockchip/rknn_model_zoo/tree/main/examples/yolov8_pose"
+  }
+}

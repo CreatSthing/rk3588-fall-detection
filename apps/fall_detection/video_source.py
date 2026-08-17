@@ -111,8 +111,6 @@ class FFmpegSoftwareVideoSource:
         return True, frame
 
     def close(self) -> None:
-        if self.process.stdout is not None:
-            self.process.stdout.close()
         if self.process.poll() is None:
             self.process.terminate()
             try:
@@ -120,6 +118,8 @@ class FFmpegSoftwareVideoSource:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=3)
+        if self.process.stdout is not None:
+            self.process.stdout.close()
 
 
 def open_video_source(source: Union[str, int], decoder: str, fallback_fps: float):

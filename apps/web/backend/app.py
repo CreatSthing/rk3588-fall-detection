@@ -1101,4 +1101,40 @@ async def detections_socket(websocket: WebSocket) -> None:
         state.clients.discard(websocket)
 
 
+@app.on_event("startup")
+async def autostart_configured_cameras() -> None:
+    cameras = camera_configs()
+    stream_started = False
+    for camera_id, camera in cameras.items():
+        if not camera.get("auto_start_stream"):
+            continue
+        try:
+            await start_camera_stream(camera_id)
+            stream_started = True
+        except Exception as exc:
+            get_camera_state(camera_id).last_error = f"stream autostart failed: {exc}"
+    if stream_started:
+        await asyncio.sleep(2.0)
+    for camera_id, camera in cameras.items():
+        if not camera.get("auto_start_pipeline"):
+            continue
+        try:
+            await start_camera_pipeline(camera_id, StartRequest())
+        except Exception as exc:
+            runtime = get_camera_state(camera_id)
+            runtime.running = False
+            runtime.last_error = f"pipeline autostart failed: {exc}"
+
+
+@app.on_event("shutdown")
+async def stop_camera_processes() -> None:
+    for runtime in list(state.cameras.values()):
+        runtime.running = False
+        if runtime.simulator_task:
+            runtime.simulator_task.cancel()
+        await stop_process(runtime.pipeline_process)
+        await stop_process(runtime.record_process)
+        await stop_process(runtime.stream_process)
+
+
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

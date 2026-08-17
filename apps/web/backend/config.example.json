@@ -6,6 +6,8 @@
       "width": 640,
       "height": 360,
       "contexts": 1,
+      "auto_start_stream": true,
+      "auto_start_pipeline": true,
       "player_url": "/live/cam1",
       "rtsp_url": "rtsp://127.0.0.1:8554/live/cam1",
       "hls_url": "/live/cam1/index.m3u8",

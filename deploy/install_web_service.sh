@@ -52,9 +52,18 @@ pip_trusted_host=${RK3588_PIP_TRUSTED_HOST:-repo.huaweicloud.com}
     --trusted-host "$pip_trusted_host" \
     -r "$app_root/apps/web/backend/requirements.txt" \
     -r "$app_root/apps/fall_detection/requirements.txt"
+rknn_wheel=$(find "$app_root/vendor" -maxdepth 1 -type f -name 'rknn_toolkit_lite2-*.whl' 2>/dev/null | sort | tail -n 1 || true)
+if [ -n "$rknn_wheel" ]; then
+    "$app_root/.venv/bin/python" -m pip install "$rknn_wheel"
+fi
 if ! "$app_root/.venv/bin/python" -c 'import cv2, numpy; from rknnlite.api import RKNNLite' >/dev/null 2>&1; then
-    echo "OpenCV or rknn-toolkit-lite2 is missing. Install the board/Runtime-matched packages before deployment." >&2
+    echo "OpenCV or rknn-toolkit-lite2 is missing." >&2
+    echo "Install python3-opencv/python3-numpy and place the Runtime-matched RKNNLite wheel under $app_root/vendor/." >&2
     exit 4
+fi
+if [ ! -s "$app_root/assets/weights/yolov8n-pose-int8.rknn" ]; then
+    echo "Missing pose model: $app_root/assets/weights/yolov8n-pose-int8.rknn" >&2
+    exit 5
 fi
 chmod +x "$app_root/deploy/run_web.sh"
 chown -R "$service_user:$service_group" "$app_root/.venv"
