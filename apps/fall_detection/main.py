@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import shutil
+import subprocess
 import sys
 import time
 from collections import deque
@@ -33,6 +35,21 @@ class EventClipBuffer:
     def _write_clip(path: Path, fps: float, frames: List[bytes]) -> Tuple[bool, str]:
         if not frames:
             return False, "no buffered frames"
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg:
+            command = [
+                ffmpeg,
+                "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "image2pipe", "-vcodec", "mjpeg", "-framerate", f"{fps:.3f}",
+                "-i", "pipe:0", "-an", "-c:v", "libx264", "-preset", "veryfast",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path),
+            ]
+            completed = subprocess.run(command, input=b"".join(frames), capture_output=True)
+            if completed.returncode == 0 and path.exists() and path.stat().st_size > 0:
+                return True, ""
+            error = completed.stderr.decode("utf-8", errors="replace").strip()[-1000:]
+        else:
+            error = "ffmpeg not found"
         first = cv2.imdecode(np.frombuffer(frames[0], dtype=np.uint8), cv2.IMREAD_COLOR)
         if first is None:
             return False, "cannot decode buffered frame"
@@ -46,7 +63,7 @@ class EventClipBuffer:
                 break
             candidate.release()
         if writer is None:
-            return False, "OpenCV cannot open MP4 event writer"
+            return False, f"FFmpeg failed ({error}); OpenCV cannot open MP4 event writer"
         try:
             for encoded in frames:
                 frame = cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), cv2.IMREAD_COLOR)
