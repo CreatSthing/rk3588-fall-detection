@@ -1,11 +1,12 @@
 # RK3588 Web 控制台
 
-这个目录提供一个轻量的 FastAPI + Vue 控制台，用来先把“浏览器控制检测进程、查看检测结果”这条链路跑通。
+这个目录提供一个轻量的 FastAPI + Vue 控制台，用来把“多路摄像头推流、浏览器控制检测进程、查看检测结果”这条链路跑通。
 
 ## 目标
 
-- REST API 控制检测流程：启动、停止、查询状态、开始录像、停止录像。
+- REST API 按摄像头控制检测流程：启动、停止、查询状态、开始录像、停止录像。
 - WebSocket 实时推送检测结果到浏览器。
+- 前端按 `cameras[]` 多路展示视频和检测框。
 - 前端用 Vue 3 做单页控制台，当前不依赖 Node/Vite 构建链，方便直接部署到 RK3588 板子。
 
 ## 目录
@@ -42,6 +43,15 @@ http://板子IP:8000
 
 ```text
 GET  /api/status
+GET  /api/cameras
+POST /api/cameras/{camera_id}/stream/start
+POST /api/cameras/{camera_id}/stream/stop
+POST /api/cameras/{camera_id}/pipeline/start
+POST /api/cameras/{camera_id}/pipeline/stop
+POST /api/cameras/{camera_id}/recording/start
+POST /api/cameras/{camera_id}/recording/stop
+
+# 兼容旧版单路接口，默认映射到 cam1
 PUT  /api/pipeline
 DELETE /api/pipeline
 PUT  /api/recording
@@ -67,11 +77,18 @@ WS   /ws/detections
 
 ## 后端如何接真实检测
 
-后端通过 `config.example.json` 里的 `pipeline_command` 启动检测程序。当前默认指向：
+后端通过 `config.example.json` 里的 `cameras[]` 配置多路摄像头。每一路都有自己的：
 
 ```text
-/opt/rk3588-camera/current/bin/mpp_rga_thread_pool
+id/name
+width/height
+player_url/rtsp_url/hls_url
+stream_command
+pipeline_command
+record_command
 ```
+
+前端检测框按每路的 `width/height` 做坐标归一化。比如 TP-Link 子码流是 `640x360`，检测框坐标也来自这一路 `640x360` 图像，就必须用 `640x360` 缩放；如果误用 `1920x1080`，框会明显变小，无法框住人。
 
 当 C++ 检测程序后续输出 JSON 行时，后端会把它识别为检测结果并推送到浏览器：
 

@@ -156,7 +156,14 @@ button:disabled {
 }
 
 .detections {
+  grid-column: auto;
+}
+
+.camera-grid {
+  display: grid;
+  gap: 18px;
   grid-column: span 2;
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
 }
 
 .section-head {
@@ -168,7 +175,8 @@ button:disabled {
 }
 
 .section-head p,
-.video-meta {
+.video-meta,
+.camera-state {
   color: #9fb3c8;
   font-size: 13px;
   margin: 0;
@@ -177,8 +185,50 @@ button:disabled {
 .video-meta {
   display: grid;
   gap: 6px;
-  max-width: 48%;
+  margin: 12px 0;
   overflow-wrap: anywhere;
+}
+
+.camera-id {
+  color: #67e8f9;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.camera-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.camera-state span {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.camera-state span.ok {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #86efac;
+}
+
+.camera-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1fr) 96px auto;
+  margin-bottom: 12px;
+}
+
+.compact {
+  margin: 0 !important;
+  white-space: nowrap;
+}
+
+.hint {
+  color: #b6c3d1;
+  line-height: 1.7;
 }
 
 .video-shell {
@@ -260,6 +310,17 @@ pre {
   .video-meta {
     display: block;
     max-width: none;
+  }
+
+  .camera-grid,
+  .camera-controls {
+    display: block;
+  }
+
+  .camera-controls input,
+  .camera-controls label {
+    margin-bottom: 10px;
+    width: 100%;
   }
 
   .card {

@@ -21,18 +21,13 @@ from pydantic import BaseModel, Field
 ROOT_DIR = Path(__file__).resolve().parents[3]
 FRONTEND_DIR = ROOT_DIR / "apps" / "web" / "frontend"
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.example.json")
+DEFAULT_CAMERA_ID = "cam1"
 
 
 class StartRequest(BaseModel):
-    source: Optional[str] = Field(
-        default=None,
-        description="Optional video path or stream URL. If provided, it replaces the third argument in pipeline_command.",
-    )
+    source: Optional[str] = Field(default=None)
     contexts: Optional[int] = Field(default=None, ge=1, le=20)
-    dry_run: bool = Field(
-        default=False,
-        description="Run a simulated pipeline that emits fake detection events for UI testing.",
-    )
+    dry_run: bool = False
 
 
 class CommandResponse(BaseModel):
@@ -41,7 +36,8 @@ class CommandResponse(BaseModel):
 
 
 @dataclass
-class RuntimeState:
+class CameraRuntime:
+    camera_id: str
     running: bool = False
     recording: bool = False
     started_at: Optional[float] = None
@@ -56,11 +52,16 @@ class RuntimeState:
     simulator_task: Optional[asyncio.Task] = None
     record_process: Optional[asyncio.subprocess.Process] = None
     stream_process: Optional[asyncio.subprocess.Process] = None
+
+
+@dataclass
+class RuntimeState:
+    cameras: Dict[str, CameraRuntime] = field(default_factory=dict)
     clients: Set[WebSocket] = field(default_factory=set)
 
 
 state = RuntimeState()
-app = FastAPI(title="RK3588 Smart Camera Console", version="0.1.0")
+app = FastAPI(title="RK3588 Smart Camera Console", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,19 +80,63 @@ def load_config() -> Dict[str, Any]:
         return json.load(f)
 
 
-def build_pipeline_command(request: StartRequest) -> List[str]:
-    config = load_config()
-    command = list(config.get("pipeline_command") or [])
+def normalize_camera_config(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    cameras = config.get("cameras")
+    if isinstance(cameras, list) and cameras:
+        return cameras
+    return [
+        {
+            "id": DEFAULT_CAMERA_ID,
+            "name": "Camera 1",
+            "width": int(config.get("video_width") or 640),
+            "height": int(config.get("video_height") or 360),
+            "player_url": config.get("player_url") or "/live/raw",
+            "rtsp_url": config.get("rtsp_url") or "rtsp://127.0.0.1:8554/live/raw",
+            "hls_url": config.get("hls_url") or "/live/raw/index.m3u8",
+            "stream_command": config.get("stream_command") or [],
+            "pipeline_command": config.get("pipeline_command") or [],
+            "record_command": config.get("record_command") or [],
+        }
+    ]
+
+
+def camera_configs() -> Dict[str, Dict[str, Any]]:
+    configs: Dict[str, Dict[str, Any]] = {}
+    for index, camera in enumerate(normalize_camera_config(load_config()), start=1):
+        camera_id = str(camera.get("id") or f"cam{index}")
+        normalized = dict(camera)
+        normalized["id"] = camera_id
+        normalized.setdefault("name", camera_id)
+        normalized.setdefault("width", 640)
+        normalized.setdefault("height", 360)
+        normalized.setdefault("player_url", f"/live/{camera_id}")
+        normalized.setdefault("rtsp_url", f"rtsp://127.0.0.1:8554/live/{camera_id}")
+        normalized.setdefault("hls_url", f"/live/{camera_id}/index.m3u8")
+        configs[camera_id] = normalized
+    return configs
+
+
+def get_camera_config(camera_id: str) -> Dict[str, Any]:
+    configs = camera_configs()
+    if camera_id not in configs:
+        raise HTTPException(status_code=404, detail=f"camera not found: {camera_id}")
+    return configs[camera_id]
+
+
+def get_camera_state(camera_id: str) -> CameraRuntime:
+    if camera_id not in state.cameras:
+        state.cameras[camera_id] = CameraRuntime(camera_id=camera_id)
+    return state.cameras[camera_id]
+
+
+def build_pipeline_command(camera: Dict[str, Any], request: StartRequest) -> List[str]:
+    command = list(camera.get("pipeline_command") or [])
     if not command:
-        raise HTTPException(status_code=400, detail="pipeline_command is empty. Set RK3588_WEB_CONFIG or edit config.example.json.")
+        raise HTTPException(status_code=400, detail=f"pipeline_command is empty for camera {camera['id']}")
     if request.source and len(command) >= 3:
         command[2] = request.source
     if request.contexts is not None:
         exe_name = Path(command[0]).name
-        # yolov5_thread_pool 参数顺序:
-        #   <model> <video> [contexts] [draw] [decoder] [profile.csv] [json_events]
-        # mpp_rga_thread_pool 参数顺序:
-        #   <model> <annexb> <codec> [contexts] [draw] ...
         context_index = 3 if exe_name == "yolov5_thread_pool" else 4
         if len(command) > context_index:
             command[context_index] = str(request.contexts)
@@ -101,20 +146,36 @@ def build_pipeline_command(request: StartRequest) -> List[str]:
     return command
 
 
-def public_state() -> Dict[str, Any]:
+def public_camera_state(camera_id: str) -> Dict[str, Any]:
+    camera = get_camera_config(camera_id)
+    runtime = get_camera_state(camera_id)
     return {
-        "running": state.running,
-        "recording": state.recording,
-        "started_at": state.started_at,
-        "uptime_sec": round(time.time() - state.started_at, 3) if state.started_at else 0,
-        "source": state.source,
-        "contexts": state.contexts,
-        "frames": state.frames,
-        "fps": round(state.fps, 2),
-        "last_error": state.last_error,
-        "last_result": state.last_result,
-        "streaming": state.stream_process is not None and state.stream_process.returncode is None,
+        "id": camera_id,
+        "name": camera.get("name", camera_id),
+        "width": int(camera.get("width") or 640),
+        "height": int(camera.get("height") or 360),
+        "player_url": camera.get("player_url"),
+        "rtsp_url": camera.get("rtsp_url"),
+        "hls_url": camera.get("hls_url"),
+        "running": runtime.running,
+        "recording": runtime.recording,
+        "started_at": runtime.started_at,
+        "uptime_sec": round(time.time() - runtime.started_at, 3) if runtime.started_at else 0,
+        "source": runtime.source,
+        "contexts": runtime.contexts,
+        "frames": runtime.frames,
+        "fps": round(runtime.fps, 2),
+        "last_error": runtime.last_error,
+        "last_result": runtime.last_result,
+        "streaming": runtime.stream_process is not None and runtime.stream_process.returncode is None,
     }
+
+
+def public_state() -> Dict[str, Any]:
+    configs = camera_configs()
+    cameras = [public_camera_state(camera_id) for camera_id in configs]
+    primary = cameras[0] if cameras else {}
+    return {**primary, "cameras": cameras}
 
 
 async def broadcast(event: Dict[str, Any]) -> None:
@@ -156,11 +217,12 @@ def parse_pipeline_line(line: str) -> Optional[Dict[str, Any]]:
     return {"type": "log", "payload": {"level": "debug", "message": line}}
 
 
-async def read_pipeline_output(process: asyncio.subprocess.Process) -> None:
+async def read_pipeline_output(camera_id: str, process: asyncio.subprocess.Process) -> None:
     assert process.stdout is not None
+    runtime = get_camera_state(camera_id)
     log_dir = Path("/var/log/rk3588-camera")
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "pipeline.log"
+    log_path = log_dir / f"pipeline-{camera_id}.log"
     while True:
         raw = await process.stdout.readline()
         if not raw:
@@ -174,55 +236,68 @@ async def read_pipeline_output(process: asyncio.subprocess.Process) -> None:
         event = parse_pipeline_line(line)
         if event is None:
             continue
+        event["camera_id"] = camera_id
         if event["type"] == "detection":
-            state.frames += 1
-            state.last_result = event["payload"]
-            if "fps" in event["payload"]:
+            runtime.frames += 1
+            payload = dict(event["payload"])
+            payload["camera_id"] = camera_id
+            runtime.last_result = payload
+            event["payload"] = payload
+            if "fps" in payload:
                 try:
-                    state.fps = float(event["payload"]["fps"])
+                    runtime.fps = float(payload["fps"])
                 except (TypeError, ValueError):
                     pass
         elif event["payload"]["level"] == "error":
-            state.last_error = event["payload"]["message"]
+            runtime.last_error = event["payload"]["message"]
         await broadcast(event)
 
     return_code = await process.wait()
-    state.running = False
-    state.pipeline_process = None
+    runtime.running = False
+    runtime.pipeline_process = None
     await broadcast({"type": "status", "payload": public_state()})
-    await broadcast({"type": "log", "payload": {"level": "info", "message": f"pipeline exited with code {return_code}"}})
+    await broadcast({
+        "type": "log",
+        "camera_id": camera_id,
+        "payload": {"level": "info", "message": f"{camera_id} pipeline exited with code {return_code}"},
+    })
 
 
-async def simulate_detections() -> None:
+async def simulate_detections(camera_id: str) -> None:
+    runtime = get_camera_state(camera_id)
+    camera = get_camera_config(camera_id)
+    width = int(camera.get("width") or 640)
+    height = int(camera.get("height") or 360)
     labels = ["person", "car", "bicycle", "dog"]
     last_time = time.time()
-    while state.running:
+    while runtime.running:
         await asyncio.sleep(0.25)
         now = time.time()
-        state.frames += 1
-        state.fps = 1.0 / max(now - last_time, 1e-6)
+        runtime.frames += 1
+        runtime.fps = 1.0 / max(now - last_time, 1e-6)
         last_time = now
         detections = [
             {
                 "label": random.choice(labels),
                 "score": round(random.uniform(0.55, 0.95), 3),
                 "box": {
-                    "x": random.randint(20, 520),
-                    "y": random.randint(20, 320),
-                    "w": random.randint(60, 180),
-                    "h": random.randint(60, 180),
+                    "x": random.randint(20, max(21, width - 160)),
+                    "y": random.randint(20, max(21, height - 160)),
+                    "w": random.randint(60, min(180, max(61, width // 3))),
+                    "h": random.randint(60, min(180, max(61, height // 2))),
                 },
             }
             for _ in range(random.randint(1, 4))
         ]
         result = {
-            "frame_id": state.frames,
+            "camera_id": camera_id,
+            "frame_id": runtime.frames,
             "timestamp": now,
-            "fps": round(state.fps, 2),
+            "fps": round(runtime.fps, 2),
             "detections": detections,
         }
-        state.last_result = result
-        await broadcast({"type": "detection", "payload": result})
+        runtime.last_result = result
+        await broadcast({"type": "detection", "camera_id": camera_id, "payload": result})
         await broadcast({"type": "status", "payload": public_state()})
 
 
@@ -247,118 +322,169 @@ async def get_status() -> Dict[str, Any]:
     return public_state()
 
 
-@app.post("/api/pipeline/start", response_model=CommandResponse)
-@app.put("/api/pipeline", response_model=CommandResponse)
-async def start_pipeline(request: StartRequest) -> CommandResponse:
-    if state.running:
+@app.get("/api/cameras")
+async def get_cameras() -> Dict[str, Any]:
+    return {"cameras": public_state()["cameras"]}
+
+
+@app.post("/api/cameras/{camera_id}/pipeline/start", response_model=CommandResponse)
+@app.put("/api/cameras/{camera_id}/pipeline", response_model=CommandResponse)
+async def start_camera_pipeline(camera_id: str, request: StartRequest) -> CommandResponse:
+    camera = get_camera_config(camera_id)
+    runtime = get_camera_state(camera_id)
+    if runtime.running:
         raise HTTPException(status_code=409, detail="pipeline is already running")
 
-    state.running = True
-    state.started_at = time.time()
-    state.source = request.source
-    state.contexts = request.contexts
-    state.frames = 0
-    state.fps = 0.0
-    state.last_error = None
-    state.last_result = None
+    runtime.running = True
+    runtime.started_at = time.time()
+    runtime.source = request.source
+    runtime.contexts = request.contexts
+    runtime.frames = 0
+    runtime.fps = 0.0
+    runtime.last_error = None
+    runtime.last_result = None
 
     if request.dry_run:
-        state.simulator_task = asyncio.create_task(simulate_detections())
+        runtime.simulator_task = asyncio.create_task(simulate_detections(camera_id))
         await broadcast({"type": "status", "payload": public_state()})
-        return CommandResponse(ok=True, message="simulated pipeline started")
+        return CommandResponse(ok=True, message=f"{camera_id} simulated pipeline started")
 
-    command = build_pipeline_command(request)
+    command = build_pipeline_command(camera, request)
     try:
-        state.pipeline_process = await asyncio.create_subprocess_exec(
+        runtime.pipeline_process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(ROOT_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        state.pipeline_task = asyncio.create_task(read_pipeline_output(state.pipeline_process))
+        runtime.pipeline_task = asyncio.create_task(read_pipeline_output(camera_id, runtime.pipeline_process))
     except Exception as exc:
-        state.running = False
-        state.last_error = str(exc)
+        runtime.running = False
+        runtime.last_error = str(exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message="pipeline started")
+    return CommandResponse(ok=True, message=f"{camera_id} pipeline started")
 
 
-@app.post("/api/pipeline/stop", response_model=CommandResponse)
-@app.delete("/api/pipeline", response_model=CommandResponse)
-async def stop_pipeline() -> CommandResponse:
-    if state.simulator_task:
-        state.running = False
-        state.simulator_task.cancel()
-        state.simulator_task = None
-    await stop_process(state.pipeline_process)
-    state.running = False
-    state.pipeline_process = None
+@app.post("/api/cameras/{camera_id}/pipeline/stop", response_model=CommandResponse)
+@app.delete("/api/cameras/{camera_id}/pipeline", response_model=CommandResponse)
+async def stop_camera_pipeline(camera_id: str) -> CommandResponse:
+    get_camera_config(camera_id)
+    runtime = get_camera_state(camera_id)
+    if runtime.simulator_task:
+        runtime.running = False
+        runtime.simulator_task.cancel()
+        runtime.simulator_task = None
+    await stop_process(runtime.pipeline_process)
+    runtime.running = False
+    runtime.pipeline_process = None
     await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message="pipeline stopped")
+    return CommandResponse(ok=True, message=f"{camera_id} pipeline stopped")
 
 
-@app.post("/api/recording/start", response_model=CommandResponse)
-@app.put("/api/recording", response_model=CommandResponse)
-async def start_recording() -> CommandResponse:
-    if state.recording:
-        raise HTTPException(status_code=409, detail="recording is already running")
-
-    config = load_config()
-    command = list(config.get("record_command") or [])
-    if command:
-        try:
-            state.record_process = await asyncio.create_subprocess_exec(*command, cwd=str(ROOT_DIR))
-        except Exception as exc:
-            state.last_error = str(exc)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    state.recording = True
-    await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message="recording started")
-
-
-@app.post("/api/recording/stop", response_model=CommandResponse)
-@app.delete("/api/recording", response_model=CommandResponse)
-async def stop_recording() -> CommandResponse:
-    await stop_process(state.record_process)
-    state.record_process = None
-    state.recording = False
-    await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message="recording stopped")
-
-
-@app.post("/api/stream/start", response_model=CommandResponse)
-@app.put("/api/stream", response_model=CommandResponse)
-async def start_stream() -> CommandResponse:
-    if state.stream_process is not None and state.stream_process.returncode is None:
+@app.post("/api/cameras/{camera_id}/stream/start", response_model=CommandResponse)
+@app.put("/api/cameras/{camera_id}/stream", response_model=CommandResponse)
+async def start_camera_stream(camera_id: str) -> CommandResponse:
+    camera = get_camera_config(camera_id)
+    runtime = get_camera_state(camera_id)
+    if runtime.stream_process is not None and runtime.stream_process.returncode is None:
         raise HTTPException(status_code=409, detail="stream is already running")
-    config = load_config()
-    command = list(config.get("stream_command") or [])
+    command = list(camera.get("stream_command") or [])
     if not command:
-        raise HTTPException(status_code=400, detail="stream_command is empty")
+        raise HTTPException(status_code=400, detail=f"stream_command is empty for camera {camera_id}")
     try:
-        state.stream_process = await asyncio.create_subprocess_exec(
+        runtime.stream_process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(ROOT_DIR),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
     except Exception as exc:
-        state.last_error = str(exc)
+        runtime.last_error = str(exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message="stream started")
+    return CommandResponse(ok=True, message=f"{camera_id} stream started")
+
+
+@app.post("/api/cameras/{camera_id}/stream/stop", response_model=CommandResponse)
+@app.delete("/api/cameras/{camera_id}/stream", response_model=CommandResponse)
+async def stop_camera_stream(camera_id: str) -> CommandResponse:
+    get_camera_config(camera_id)
+    runtime = get_camera_state(camera_id)
+    await stop_process(runtime.stream_process)
+    runtime.stream_process = None
+    await broadcast({"type": "status", "payload": public_state()})
+    return CommandResponse(ok=True, message=f"{camera_id} stream stopped")
+
+
+@app.post("/api/cameras/{camera_id}/recording/start", response_model=CommandResponse)
+@app.put("/api/cameras/{camera_id}/recording", response_model=CommandResponse)
+async def start_camera_recording(camera_id: str) -> CommandResponse:
+    camera = get_camera_config(camera_id)
+    runtime = get_camera_state(camera_id)
+    if runtime.recording:
+        raise HTTPException(status_code=409, detail="recording is already running")
+
+    command = list(camera.get("record_command") or [])
+    if command:
+        try:
+            runtime.record_process = await asyncio.create_subprocess_exec(*command, cwd=str(ROOT_DIR))
+        except Exception as exc:
+            runtime.last_error = str(exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    runtime.recording = True
+    await broadcast({"type": "status", "payload": public_state()})
+    return CommandResponse(ok=True, message=f"{camera_id} recording started")
+
+
+@app.post("/api/cameras/{camera_id}/recording/stop", response_model=CommandResponse)
+@app.delete("/api/cameras/{camera_id}/recording", response_model=CommandResponse)
+async def stop_camera_recording(camera_id: str) -> CommandResponse:
+    get_camera_config(camera_id)
+    runtime = get_camera_state(camera_id)
+    await stop_process(runtime.record_process)
+    runtime.record_process = None
+    runtime.recording = False
+    await broadcast({"type": "status", "payload": public_state()})
+    return CommandResponse(ok=True, message=f"{camera_id} recording stopped")
+
+
+@app.post("/api/pipeline/start", response_model=CommandResponse)
+@app.put("/api/pipeline", response_model=CommandResponse)
+async def start_pipeline(request: StartRequest) -> CommandResponse:
+    return await start_camera_pipeline(DEFAULT_CAMERA_ID, request)
+
+
+@app.post("/api/pipeline/stop", response_model=CommandResponse)
+@app.delete("/api/pipeline", response_model=CommandResponse)
+async def stop_pipeline() -> CommandResponse:
+    return await stop_camera_pipeline(DEFAULT_CAMERA_ID)
+
+
+@app.post("/api/stream/start", response_model=CommandResponse)
+@app.put("/api/stream", response_model=CommandResponse)
+async def start_stream() -> CommandResponse:
+    return await start_camera_stream(DEFAULT_CAMERA_ID)
 
 
 @app.post("/api/stream/stop", response_model=CommandResponse)
 @app.delete("/api/stream", response_model=CommandResponse)
 async def stop_stream() -> CommandResponse:
-    await stop_process(state.stream_process)
-    state.stream_process = None
-    await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message="stream stopped")
+    return await stop_camera_stream(DEFAULT_CAMERA_ID)
+
+
+@app.post("/api/recording/start", response_model=CommandResponse)
+@app.put("/api/recording", response_model=CommandResponse)
+async def start_recording() -> CommandResponse:
+    return await start_camera_recording(DEFAULT_CAMERA_ID)
+
+
+@app.post("/api/recording/stop", response_model=CommandResponse)
+@app.delete("/api/recording", response_model=CommandResponse)
+async def stop_recording() -> CommandResponse:
+    return await stop_camera_recording(DEFAULT_CAMERA_ID)
 
 
 @app.websocket("/ws/detections")

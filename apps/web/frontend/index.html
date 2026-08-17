@@ -12,8 +12,8 @@
       <header class="hero">
         <div>
           <p class="eyebrow">RK3588 Smart Camera</p>
-          <h1>智能摄像头控制台</h1>
-          <p class="sub">视频推流、AI 检测、结果推送和浏览器可视化闭环。</p>
+          <h1>多路智能摄像头控制台</h1>
+          <p class="sub">多路视频推流、AI 检测、结果推送和浏览器可视化闭环。</p>
         </div>
         <div class="status-pill" :class="{ online: wsConnected }">
           {{ wsConnected ? '实时连接中' : '未连接' }}
@@ -22,89 +22,108 @@
 
       <main class="grid">
         <section class="card controls">
-          <h2>基本操作</h2>
+          <h2>全局状态</h2>
+          <div class="metric-row">
+            <span>摄像头数量</span>
+            <strong>{{ status.cameras.length }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>正在推流</span>
+            <strong>{{ totalStreaming }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>正在检测</span>
+            <strong>{{ totalRunning }}</strong>
+          </div>
           <label>
-            视频源 / RTSP
-            <input v-model="form.source" placeholder="留空使用后端配置；也可填 rtsp://... 或本地视频路径" />
-          </label>
-          <label>
-            NPU Context 数
+            默认 NPU Context 数
             <input v-model.number="form.contexts" type="number" min="1" max="20" />
           </label>
           <label class="check">
             <input v-model="form.dryRun" type="checkbox" />
-            使用模拟检测结果测试页面
+            新摄像头默认使用模拟检测结果测试页面
           </label>
-          <div class="buttons">
-            <button :disabled="status.streaming" @click="startStream">开始推流</button>
-            <button :disabled="!status.streaming" @click="stopStream">停止推流</button>
-            <button class="primary" :disabled="status.running" @click="startPipeline">启动检测</button>
-            <button :disabled="!status.running" @click="stopPipeline">停止检测</button>
-            <button :disabled="status.recording" @click="startRecording">开始录像</button>
-            <button :disabled="!status.recording" @click="stopRecording">停止录像</button>
-          </div>
           <p v-if="message" class="message">{{ message }}</p>
         </section>
 
         <section class="card metrics">
-          <h2>运行状态</h2>
-          <div class="metric-row">
-            <span>推流</span>
-            <strong>{{ status.streaming ? '推流中' : '未推流' }}</strong>
-          </div>
-          <div class="metric-row">
-            <span>检测进程</span>
-            <strong>{{ status.running ? '运行中' : '已停止' }}</strong>
-          </div>
-          <div class="metric-row">
-            <span>录像</span>
-            <strong>{{ status.recording ? '录像中' : '未录像' }}</strong>
-          </div>
-          <div class="metric-row">
-            <span>检测 FPS</span>
-            <strong>{{ status.fps || 0 }}</strong>
-          </div>
-          <div class="metric-row">
-            <span>已处理帧</span>
-            <strong>{{ status.frames || 0 }}</strong>
-          </div>
-          <div class="metric-row">
-            <span>运行时长</span>
-            <strong>{{ status.uptime_sec || 0 }}s</strong>
-          </div>
-          <p v-if="status.last_error" class="error">错误：{{ status.last_error }}</p>
+          <h2>说明</h2>
+          <p class="hint">
+            每路摄像头独立启动推流和检测。检测框按该路视频真实分辨率缩放；
+            例如 TP-Link 子码流是 640×360，就必须用 640×360 算框，不能用 1920×1080。
+          </p>
+          <p class="hint">
+            多路配置在后端 JSON 的 <code>cameras</code> 数组里维护，每路可以有不同 RTSP、MediaMTX 路径和检测命令。
+          </p>
         </section>
 
-        <section class="card detections">
-          <div class="section-head">
-            <div>
-              <h2>实时画面 + 检测框</h2>
-              <p>播放器：{{ form.playerUrl }}</p>
-            </div>
-            <div class="video-meta">
-              <span>RTSP: {{ rtspUrl }}</span>
-              <span>HLS: {{ hlsUrl }}</span>
-            </div>
-          </div>
-          <div class="video-shell">
-            <iframe class="video-frame" :src="form.playerUrl" allow="autoplay; fullscreen"></iframe>
-            <div class="overlay">
-              <div
-                v-for="(det, index) in latestDetections"
-                :key="index"
-                class="box"
-                :style="boxStyle(det.box)"
-              >
-                <span>{{ det.label }} {{ Math.round((det.score || 0) * 100) }}%</span>
+        <section class="camera-grid">
+          <article v-for="camera in status.cameras" :key="camera.id" class="card detections">
+            <div class="section-head">
+              <div>
+                <h2>{{ camera.name }} <span class="camera-id">{{ camera.id }}</span></h2>
+                <p>
+                  {{ camera.width }}×{{ camera.height }} /
+                  FPS {{ camera.fps || 0 }} /
+                  帧 {{ camera.frames || 0 }}
+                </p>
+              </div>
+              <div class="camera-state">
+                <span :class="{ ok: camera.streaming }">{{ camera.streaming ? '推流中' : '未推流' }}</span>
+                <span :class="{ ok: camera.running }">{{ camera.running ? '检测中' : '未检测' }}</span>
+                <span :class="{ ok: camera.recording }">{{ camera.recording ? '录像中' : '未录像' }}</span>
               </div>
             </div>
-          </div>
-          <ul class="det-list">
-            <li v-for="(det, index) in latestDetections" :key="`row-${index}`">
-              {{ det.label }} / {{ Number(det.score || 0).toFixed(3) }} /
-              x={{ det.box?.x }}, y={{ det.box?.y }}, w={{ det.box?.w }}, h={{ det.box?.h }}
-            </li>
-          </ul>
+
+            <div class="camera-controls">
+              <input
+                v-model="cameraForms[camera.id].source"
+                placeholder="留空使用后端配置；也可填 rtsp://... 或本地视频路径"
+              />
+              <input v-model.number="cameraForms[camera.id].contexts" type="number" min="1" max="20" />
+              <label class="check compact">
+                <input v-model="cameraForms[camera.id].dryRun" type="checkbox" />
+                模拟
+              </label>
+            </div>
+
+            <div class="buttons">
+              <button :disabled="camera.streaming" @click="startStream(camera)">开始推流</button>
+              <button :disabled="!camera.streaming" @click="stopStream(camera)">停止推流</button>
+              <button class="primary" :disabled="camera.running" @click="startPipeline(camera)">启动检测</button>
+              <button :disabled="!camera.running" @click="stopPipeline(camera)">停止检测</button>
+              <button :disabled="camera.recording" @click="startRecording(camera)">开始录像</button>
+              <button :disabled="!camera.recording" @click="stopRecording(camera)">停止录像</button>
+            </div>
+
+            <p v-if="camera.last_error" class="error">错误：{{ camera.last_error }}</p>
+            <div class="video-meta">
+              <span>Player: {{ camera.player_url_abs }}</span>
+              <span>RTSP: {{ camera.rtsp_url_abs }}</span>
+              <span>HLS: {{ camera.hls_url_abs }}</span>
+            </div>
+
+            <div class="video-shell">
+              <iframe class="video-frame" :src="camera.player_url_abs" allow="autoplay; fullscreen"></iframe>
+              <div class="overlay">
+                <div
+                  v-for="(det, index) in latestDetections(camera)"
+                  :key="index"
+                  class="box"
+                  :style="boxStyle(camera, det.box)"
+                >
+                  <span>{{ det.label }} {{ Math.round((det.score || 0) * 100) }}%</span>
+                </div>
+              </div>
+            </div>
+
+            <ul class="det-list">
+              <li v-for="(det, index) in latestDetections(camera)" :key="`row-${camera.id}-${index}`">
+                {{ det.label }} / {{ Number(det.score || 0).toFixed(3) }} /
+                x={{ det.box?.x }}, y={{ det.box?.y }}, w={{ det.box?.w }}, h={{ det.box?.h }}
+              </li>
+            </ul>
+          </article>
         </section>
 
         <section class="card logs">

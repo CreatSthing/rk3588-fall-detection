@@ -3,39 +3,64 @@ const { createApp, computed, onMounted, reactive, ref } = Vue;
 createApp({
   setup() {
     const status = reactive({
-      running: false,
-      recording: false,
-      streaming: false,
-      fps: 0,
-      frames: 0,
-      uptime_sec: 0,
-      last_error: null,
-      last_result: null,
+      cameras: [],
     });
     const form = reactive({
-      source: "",
       contexts: 8,
       dryRun: false,
-      videoWidth: 1920,
-      videoHeight: 1080,
-      playerUrl: `${location.protocol}//${location.hostname}:8889/live/raw`,
     });
+    const cameraForms = reactive({});
     const wsConnected = ref(false);
     const message = ref("");
     const logs = ref([]);
 
-    const latestDetections = computed(() => status.last_result?.detections || []);
-    const rtspUrl = computed(() => `rtsp://${location.hostname}:8554/live/raw`);
-    const hlsUrl = computed(() => `${location.protocol}//${location.hostname}:8888/live/raw/index.m3u8`);
+    const totalRunning = computed(() => status.cameras.filter((camera) => camera.running).length);
+    const totalStreaming = computed(() => status.cameras.filter((camera) => camera.streaming).length);
 
-    function appendLog(text) {
+    function normalizePlayerUrl(url) {
+      if (!url) return "";
+      if (url.startsWith("http://") || url.startsWith("https://")) return url;
+      return `${location.protocol}//${location.hostname}:8889${url}`;
+    }
+
+    function ensureCameraForms(cameras) {
+      for (const camera of cameras) {
+        if (!cameraForms[camera.id]) {
+          cameraForms[camera.id] = {
+            source: "",
+            contexts: form.contexts,
+            dryRun: form.dryRun,
+          };
+        }
+      }
+    }
+
+    function appendLog(text, cameraId = "") {
       const now = new Date().toLocaleTimeString();
-      logs.value.unshift(`[${now}] ${text}`);
-      logs.value = logs.value.slice(0, 100);
+      const prefix = cameraId ? `[${cameraId}] ` : "";
+      logs.value.unshift(`[${now}] ${prefix}${text}`);
+      logs.value = logs.value.slice(0, 160);
     }
 
     function applyStatus(payload) {
-      Object.assign(status, payload);
+      const cameras = Array.isArray(payload.cameras) ? payload.cameras : [payload].filter(Boolean);
+      status.cameras = cameras.map((camera) => ({
+        ...camera,
+        player_url_abs: normalizePlayerUrl(camera.player_url),
+        rtsp_url_abs: camera.rtsp_url || `rtsp://${location.hostname}:8554/live/${camera.id}`,
+        hls_url_abs: camera.hls_url?.startsWith("http")
+          ? camera.hls_url
+          : `${location.protocol}//${location.hostname}:8888${camera.hls_url || `/live/${camera.id}/index.m3u8`}`,
+      }));
+      ensureCameraForms(status.cameras);
+    }
+
+    function updateCameraDetection(cameraId, payload) {
+      const camera = status.cameras.find((item) => item.id === cameraId);
+      if (!camera) return;
+      camera.last_result = payload;
+      camera.fps = Number(payload.fps || camera.fps || 0).toFixed(2);
+      camera.frames = payload.completed || payload.frame_id || camera.frames;
     }
 
     function connectWs() {
@@ -55,11 +80,9 @@ createApp({
         if (data.type === "status") {
           applyStatus(data.payload);
         } else if (data.type === "detection") {
-          status.last_result = data.payload;
-          status.fps = Number(data.payload.fps || status.fps).toFixed(2);
-          status.frames = data.payload.completed || data.payload.frame_id || status.frames;
+          updateCameraDetection(data.camera_id || data.payload.camera_id || "cam1", data.payload);
         } else if (data.type === "log") {
-          appendLog(data.payload.message);
+          appendLog(data.payload.message, data.camera_id);
         }
       };
     }
@@ -83,42 +106,47 @@ createApp({
       applyStatus(await response.json());
     }
 
-    async function startPipeline() {
+    async function startPipeline(camera) {
+      const item = cameraForms[camera.id] || {};
       try {
-        await callApi("/api/pipeline/start", {
-          source: form.source || null,
-          contexts: form.contexts || null,
-          dry_run: form.dryRun,
+        await callApi(`/api/cameras/${camera.id}/pipeline/start`, {
+          source: item.source || null,
+          contexts: item.contexts || null,
+          dry_run: Boolean(item.dryRun),
         });
       } catch (err) {
         message.value = err.message;
-        appendLog(`启动检测失败：${err.message}`);
+        appendLog(`启动检测失败：${err.message}`, camera.id);
       }
     }
 
-    async function stopPipeline() {
-      await callApi("/api/pipeline/stop");
+    async function stopPipeline(camera) {
+      await callApi(`/api/cameras/${camera.id}/pipeline/stop`);
     }
 
-    async function startRecording() {
-      await callApi("/api/recording/start");
+    async function startRecording(camera) {
+      await callApi(`/api/cameras/${camera.id}/recording/start`);
     }
 
-    async function stopRecording() {
-      await callApi("/api/recording/stop");
+    async function stopRecording(camera) {
+      await callApi(`/api/cameras/${camera.id}/recording/stop`);
     }
 
-    async function startStream() {
-      await callApi("/api/stream/start");
+    async function startStream(camera) {
+      await callApi(`/api/cameras/${camera.id}/stream/start`);
     }
 
-    async function stopStream() {
-      await callApi("/api/stream/stop");
+    async function stopStream(camera) {
+      await callApi(`/api/cameras/${camera.id}/stream/stop`);
     }
 
-    function boxStyle(box = {}) {
-      const width = Number(form.videoWidth) || 1920;
-      const height = Number(form.videoHeight) || 1080;
+    function latestDetections(camera) {
+      return camera.last_result?.detections || [];
+    }
+
+    function boxStyle(camera, box = {}) {
+      const width = Number(camera.width) || 640;
+      const height = Number(camera.height) || 360;
       const x = Math.max(0, Number(box.x || 0));
       const y = Math.max(0, Number(box.y || 0));
       const w = Math.max(0, Number(box.w || 0));
@@ -140,12 +168,13 @@ createApp({
     return {
       status,
       form,
+      cameraForms,
       wsConnected,
       message,
       logs,
+      totalRunning,
+      totalStreaming,
       latestDetections,
-      rtspUrl,
-      hlsUrl,
       startPipeline,
       stopPipeline,
       startRecording,
