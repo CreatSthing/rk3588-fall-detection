@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=accelerator-friendly-20260817" />
+    <link rel="stylesheet" href="/static/style.css?v=monitor-primary-20260817" />
   </head>
   <body>
     <div id="app" class="page">
@@ -30,31 +30,6 @@
       </nav>
 
       <main class="grid">
-        <section v-if="activeTab === 'cameras'" class="card controls">
-          <h2>全局状态</h2>
-          <div class="metric-row">
-            <span>摄像头数量</span>
-            <strong>{{ status.cameras.length }}</strong>
-          </div>
-          <div class="metric-row">
-            <span>正在推流</span>
-            <strong>{{ totalStreaming }}</strong>
-          </div>
-          <div class="metric-row">
-            <span>正在检测</span>
-            <strong>{{ totalRunning }}</strong>
-          </div>
-          <label>
-            默认 NPU Context 数
-            <input v-model.number="form.contexts" type="number" min="1" max="20" />
-          </label>
-          <label class="check">
-            <input v-model="form.dryRun" type="checkbox" />
-            新摄像头默认使用模拟检测结果测试页面
-          </label>
-          <p v-if="message" class="message">{{ message }}</p>
-        </section>
-
         <section v-if="activeTab === 'resources'" class="card resource-dashboard">
           <div class="section-head">
             <div>
@@ -244,29 +219,9 @@
           {{ chartTooltip.text }}
         </div>
 
-        <section v-if="activeTab === 'cameras'" class="card add-camera">
-          <h2>添加摄像头</h2>
-          <div class="add-camera-grid">
-            <input v-model="newCamera.id" placeholder="ID，如 cam2" />
-            <input v-model="newCamera.name" placeholder="名称，如 门口摄像头" />
-            <input class="wide" v-model="newCamera.source_url" placeholder="RTSP，如 rtsp://user:pass@ip:554/stream2" />
-            <input v-model.number="newCamera.width" type="number" min="1" placeholder="宽，如 640" />
-            <input v-model.number="newCamera.height" type="number" min="1" placeholder="高，如 360" />
-            <input v-model.number="newCamera.contexts" type="number" min="1" max="20" placeholder="contexts" />
-            <select v-model="newCamera.decoder">
-              <option value="software">software</option>
-              <option value="auto">auto</option>
-            </select>
-            <button class="primary" @click="addCamera">添加</button>
-          </div>
-          <p class="hint">
-            添加后会写入板子本地配置文件；仓库示例不会保存真实密码。
-          </p>
-        </section>
-
-        <section v-if="activeTab === 'cameras'" class="camera-grid">
-          <article v-for="camera in status.cameras" :key="camera.id" class="card detections">
-            <div class="section-head">
+        <section v-if="activeTab === 'cameras'" class="monitor-grid">
+          <article v-for="camera in status.cameras" :key="camera.id" class="card monitor-card">
+            <div class="monitor-head">
               <div>
                 <h2>{{ camera.name }} <span class="camera-id">{{ camera.id }}</span></h2>
                 <p>
@@ -282,35 +237,9 @@
               </div>
             </div>
 
-            <div class="camera-controls">
-              <input
-                v-model="camera.form.source"
-                placeholder="留空使用后端配置；也可填 rtsp://... 或本地视频路径"
-              />
-              <input v-model.number="camera.form.contexts" type="number" min="1" max="20" />
-              <label class="check compact">
-                <input v-model="camera.form.dryRun" type="checkbox" />
-                模拟
-              </label>
-            </div>
-
-            <div class="buttons">
-              <button :disabled="camera.streaming" @click="startStream(camera)">开始推流</button>
-              <button :disabled="!camera.streaming" @click="stopStream(camera)">停止推流</button>
-              <button class="primary" :disabled="camera.running" @click="startPipeline(camera)">启动检测</button>
-              <button :disabled="!camera.running" @click="stopPipeline(camera)">停止检测</button>
-              <button :disabled="camera.recording" @click="startRecording(camera)">开始录像</button>
-              <button :disabled="!camera.recording" @click="stopRecording(camera)">停止录像</button>
-            </div>
-
             <p v-if="camera.last_error" class="error">错误：{{ camera.last_error }}</p>
-            <div class="video-meta">
-              <span>Player: {{ camera.player_url_abs }}</span>
-              <span>RTSP: {{ camera.rtsp_url_abs }}</span>
-              <span>HLS: {{ camera.hls_url_abs }}</span>
-            </div>
 
-            <div class="video-shell">
+            <div class="video-shell monitor-video">
               <iframe class="video-frame" :src="camera.player_url_abs" allow="autoplay; fullscreen"></iframe>
               <div class="overlay">
                 <div
@@ -324,21 +253,108 @@
               </div>
             </div>
 
-            <ul class="det-list">
-              <li v-for="(det, index) in latestDetections(camera)" :key="`row-${camera.id}-${index}`">
-                {{ det.label }} / {{ Number(det.score || 0).toFixed(3) }} /
-                x={{ det.box?.x }}, y={{ det.box?.y }}, w={{ det.box?.w }}, h={{ det.box?.h }}
-              </li>
-            </ul>
+            <div class="monitor-actions">
+              <div class="buttons">
+                <button :disabled="camera.streaming" @click="startStream(camera)">开始推流</button>
+                <button :disabled="!camera.streaming" @click="stopStream(camera)">停止推流</button>
+                <button class="primary" :disabled="camera.running" @click="startPipeline(camera)">启动检测</button>
+                <button :disabled="!camera.running" @click="stopPipeline(camera)">停止检测</button>
+                <button :disabled="camera.recording" @click="startRecording(camera)">录像</button>
+                <button :disabled="!camera.recording" @click="stopRecording(camera)">停录像</button>
+              </div>
+
+              <details class="camera-debug">
+                <summary>调试 / 输入源 / 检测明细</summary>
+                <div class="camera-controls">
+                  <input
+                    v-model="camera.form.source"
+                    placeholder="留空使用后端配置；也可填 rtsp://... 或本地视频路径"
+                  />
+                  <input v-model.number="camera.form.contexts" type="number" min="1" max="20" />
+                  <label class="check compact">
+                    <input v-model="camera.form.dryRun" type="checkbox" />
+                    模拟
+                  </label>
+                </div>
+                <div class="video-meta">
+                  <span>Player: {{ camera.player_url_abs }}</span>
+                  <span>RTSP: {{ camera.rtsp_url_abs }}</span>
+                  <span>HLS: {{ camera.hls_url_abs }}</span>
+                </div>
+                <ul class="det-list">
+                  <li v-for="(det, index) in latestDetections(camera)" :key="`row-${camera.id}-${index}`">
+                    {{ det.label }} / {{ Number(det.score || 0).toFixed(3) }} /
+                    x={{ det.box?.x }}, y={{ det.box?.y }}, w={{ det.box?.w }}, h={{ det.box?.h }}
+                  </li>
+                </ul>
+              </details>
+            </div>
           </article>
         </section>
 
-        <section v-if="activeTab === 'cameras'" class="card logs">
-          <h2>事件日志</h2>
-          <pre>{{ logs.join('\n') }}</pre>
+        <section v-if="activeTab === 'cameras'" class="camera-tools">
+          <section class="card tool-card">
+            <h2>运行概览</h2>
+            <div class="mini-metrics">
+              <div>
+                <span>摄像头</span>
+                <strong>{{ status.cameras.length }}</strong>
+              </div>
+              <div>
+                <span>推流</span>
+                <strong>{{ totalStreaming }}</strong>
+              </div>
+              <div>
+                <span>检测</span>
+                <strong>{{ totalRunning }}</strong>
+              </div>
+            </div>
+            <p v-if="message" class="message">{{ message }}</p>
+          </section>
+
+          <section class="card tool-card">
+            <details class="compact-panel">
+              <summary>添加摄像头</summary>
+              <div class="add-camera-grid compact-add">
+                <input v-model="newCamera.id" placeholder="ID，如 cam2" />
+                <input v-model="newCamera.name" placeholder="名称，如 门口摄像头" />
+                <input class="wide" v-model="newCamera.source_url" placeholder="RTSP，如 rtsp://user:pass@ip:554/stream2" />
+                <input v-model.number="newCamera.width" type="number" min="1" placeholder="宽，如 640" />
+                <input v-model.number="newCamera.height" type="number" min="1" placeholder="高，如 360" />
+                <input v-model.number="newCamera.contexts" type="number" min="1" max="20" placeholder="contexts" />
+                <select v-model="newCamera.decoder">
+                  <option value="software">software</option>
+                  <option value="auto">auto</option>
+                </select>
+                <button class="primary" @click="addCamera">添加</button>
+              </div>
+              <p class="hint">添加后会写入板子本地配置文件；仓库示例不会保存真实密码。</p>
+            </details>
+          </section>
+
+          <section class="card tool-card">
+            <details class="compact-panel">
+              <summary>全局默认参数</summary>
+              <label>
+                默认 NPU Context 数
+                <input v-model.number="form.contexts" type="number" min="1" max="20" />
+              </label>
+              <label class="check">
+                <input v-model="form.dryRun" type="checkbox" />
+                新摄像头默认使用模拟检测结果测试页面
+              </label>
+            </details>
+          </section>
+
+          <section class="card tool-card logs">
+            <details class="compact-panel">
+              <summary>事件日志</summary>
+              <pre>{{ logs.join('\n') }}</pre>
+            </details>
+          </section>
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=accelerator-friendly-20260817"></script>
+    <script src="/static/app.js?v=monitor-primary-20260817"></script>
   </body>
 </html>
