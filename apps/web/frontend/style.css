@@ -159,8 +159,22 @@ h1 {
   grid-template-columns: 1fr;
 }
 
+.monitor-grid:not(.monitor-size-full) .monitor-card {
+  justify-self: start;
+  width: 100%;
+}
+
 .monitor-size-small .monitor-card {
+  max-width: 460px;
   padding: 12px;
+}
+
+.monitor-size-medium .monitor-card {
+  max-width: 680px;
+}
+
+.monitor-size-large .monitor-card {
+  max-width: 980px;
 }
 
 .monitor-size-small .monitor-head {
@@ -180,6 +194,10 @@ h1 {
 .monitor-size-large .monitor-card,
 .monitor-size-full .monitor-card {
   padding: 18px;
+}
+
+.monitor-size-full .monitor-card {
+  max-width: none;
 }
 
 .monitor-card {
