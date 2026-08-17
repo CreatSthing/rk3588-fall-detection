@@ -837,7 +837,7 @@ def system_metrics() -> Dict[str, Any]:
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(FRONTEND_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/status")

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=pose-sync-20260817-3" />
+    <link rel="stylesheet" href="/static/style.css?v=pose-sync-20260817-5" />
   </head>
   <body>
     <div id="app" class="page">
@@ -312,6 +312,7 @@
               <div class="overlay">
                 <svg
                   class="pose-layer"
+                  :key="`pose-frame-${camera.last_result?.frame_id || 0}`"
                   :viewBox="poseViewBox(camera)"
                   preserveAspectRatio="none"
                 >
@@ -335,7 +336,7 @@
                 </svg>
                 <div
                   v-for="(det, index) in latestDetections(camera)"
-                  :key="index"
+                  :key="`box-${camera.last_result?.frame_id || 0}-${index}`"
                   class="box"
                   :class="{ fall: isFallDetection(det) }"
                   :style="boxStyle(camera, det.box)"
@@ -447,6 +448,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=pose-sync-20260817-3"></script>
+    <script src="/static/app.js?v=pose-sync-20260817-5"></script>
   </body>
 </html>

@@ -56,6 +56,8 @@ createApp({
     const cameraFormCache = {};
     const cameraDetectionCache = {};
     const cameraPreviewCache = {};
+    const cameraPreviewPending = {};
+    const cameraRunCache = {};
 
     const totalRunning = computed(() => status.cameras.filter((camera) => camera.running).length);
     const totalStreaming = computed(() => status.cameras.filter((camera) => camera.streaming).length);
@@ -88,17 +90,31 @@ createApp({
 
     function applyStatus(payload) {
       const cameras = Array.isArray(payload.cameras) ? payload.cameras : [payload].filter(Boolean);
-      status.cameras = cameras.map((camera) => ({
-        ...camera,
-        last_result: cameraDetectionCache[camera.id] || camera.last_result,
-        preview_url: cameraPreviewCache[camera.id] || "",
-        form: formForCamera(camera.id),
-        player_url_abs: normalizePlayerUrl(camera.player_url),
-        rtsp_url_abs: camera.rtsp_url || `rtsp://${location.hostname}:8554/live/${camera.id}`,
-        hls_url_abs: camera.hls_url && camera.hls_url.startsWith("http")
-          ? camera.hls_url
-          : `${location.protocol}//${location.hostname}:8888${camera.hls_url || `/live/${camera.id}/index.m3u8`}`,
-      }));
+      status.cameras = cameras.map((camera) => {
+        const runId = Number(camera.started_at || 0);
+        if (cameraRunCache[camera.id] !== undefined && cameraRunCache[camera.id] !== runId) {
+          delete cameraDetectionCache[camera.id];
+          delete cameraPreviewCache[camera.id];
+          delete cameraPreviewPending[camera.id];
+        }
+        cameraRunCache[camera.id] = runId;
+        const hasSynchronizedPreview = Boolean(
+          cameraDetectionCache[camera.id] && cameraPreviewCache[camera.id]
+        );
+        return {
+          ...camera,
+          // API status omits the paired JPEG. Never draw that unsynchronized
+          // result over the fallback WebRTC player.
+          last_result: hasSynchronizedPreview ? cameraDetectionCache[camera.id] : null,
+          preview_url: hasSynchronizedPreview ? cameraPreviewCache[camera.id] : "",
+          form: formForCamera(camera.id),
+          player_url_abs: normalizePlayerUrl(camera.player_url),
+          rtsp_url_abs: camera.rtsp_url || `rtsp://${location.hostname}:8554/live/${camera.id}`,
+          hls_url_abs: camera.hls_url && camera.hls_url.startsWith("http")
+            ? camera.hls_url
+            : `${location.protocol}//${location.hostname}:8888${camera.hls_url || `/live/${camera.id}/index.m3u8`}`,
+        };
+      });
     }
 
     function updateCameraDetection(cameraId, payload) {
@@ -107,12 +123,24 @@ createApp({
       if (payload.preview_jpeg) {
         const displayPayload = { ...payload };
         delete displayPayload.preview_jpeg;
-        cameraDetectionCache[cameraId] = displayPayload;
-        cameraPreviewCache[cameraId] = `data:image/jpeg;base64,${payload.preview_jpeg}`;
-        camera.last_result = displayPayload;
-        camera.preview_url = cameraPreviewCache[cameraId];
-      } else if (!camera.preview_url) {
-        camera.last_result = payload;
+        const previewUrl = `data:image/jpeg;base64,${payload.preview_jpeg}`;
+        const frameId = Number(payload.frame_id || 0);
+        const frameToken = `${Number(camera.started_at || 0)}:${frameId}:${payload.timestamp || 0}`;
+        cameraPreviewPending[cameraId] = frameToken;
+        const previewImage = new Image();
+        previewImage.onload = () => {
+          // Decoding an <img> is asynchronous. Commit the decoded image and
+          // its detections together, and discard an older decode that finishes
+          // after a newer frame has arrived.
+          if (cameraPreviewPending[cameraId] !== frameToken) return;
+          const currentCamera = status.cameras.find((item) => item.id === cameraId);
+          if (!currentCamera) return;
+          cameraDetectionCache[cameraId] = displayPayload;
+          cameraPreviewCache[cameraId] = previewUrl;
+          currentCamera.last_result = displayPayload;
+          currentCamera.preview_url = previewUrl;
+        };
+        previewImage.src = previewUrl;
       }
       camera.fps = Number(payload.fps || camera.fps || 0).toFixed(2);
       camera.frames = payload.completed || payload.frame_id || camera.frames;
