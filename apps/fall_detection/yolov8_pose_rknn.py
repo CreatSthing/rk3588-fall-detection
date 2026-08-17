@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import List, Sequence, Tuple
 
-import cv2
 import numpy as np
 
 from .heuristics import PoseDetection
@@ -47,6 +46,19 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, threshold: float) -> List[int]:
         iou = np.divide(intersection, union, out=np.zeros_like(intersection), where=union > 0)
         order = rest[iou <= threshold]
     return keep
+
+
+def _normalize_keypoint_output(output: np.ndarray) -> np.ndarray:
+    value = np.asarray(output)
+    if value.ndim == 4 and value.shape[0] == 1:
+        value = value[0]
+    if value.ndim == 3 and value.shape[:2] == (17, 3):
+        value = value.reshape(51, value.shape[-1])
+    elif value.ndim == 3 and value.shape[0] == 1:
+        value = value[0]
+    if value.ndim != 2 or value.shape[0] != 51:
+        raise RuntimeError(f"unexpected YOLOv8-Pose keypoint output shape: {np.asarray(output).shape}")
+    return value
 
 
 class YoloV8PoseRKNN:
@@ -89,6 +101,8 @@ class YoloV8PoseRKNN:
         self.close()
 
     def _letterbox(self, image: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
+        import cv2
+
         height, width = image.shape[:2]
         scale = min(self.input_size / width, self.input_size / height)
         resized_width = max(1, int(round(width * scale)))
@@ -103,9 +117,7 @@ class YoloV8PoseRKNN:
     def _decode(self, outputs: Sequence[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         if len(outputs) < 4:
             raise RuntimeError(f"expected four YOLOv8-Pose outputs, got {len(outputs)}")
-        keypoint_output = np.asarray(outputs[3])
-        if keypoint_output.ndim == 3:
-            keypoint_output = keypoint_output[0]
+        keypoint_output = _normalize_keypoint_output(np.asarray(outputs[3]))
         all_boxes: List[np.ndarray] = []
         all_scores: List[np.ndarray] = []
         all_keypoints: List[np.ndarray] = []
@@ -152,6 +164,8 @@ class YoloV8PoseRKNN:
         return boxes[keep], scores[keep], keypoints[keep]
 
     def infer(self, image: np.ndarray) -> List[PoseDetection]:
+        import cv2
+
         model_image, scale, offset_x, offset_y = self._letterbox(image)
         rgb = cv2.cvtColor(model_image, cv2.COLOR_BGR2RGB)
         outputs = self.rknn.inference(inputs=[rgb[np.newaxis, ...]], data_format=["nhwc"])

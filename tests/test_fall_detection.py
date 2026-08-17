@@ -1,6 +1,9 @@
 import unittest
 
+import numpy as np
+
 from apps.fall_detection.heuristics import FallDetector, PoseDetection, SimplePoseTracker
+from apps.fall_detection.yolov8_pose_rknn import _normalize_keypoint_output
 
 
 def pose(box, hip_y, horizontal=False):
@@ -55,6 +58,11 @@ class FallDetectorTests(unittest.TestCase):
         tracker.update([first], 0.0)
         tracker.update([second], 0.1)
         self.assertEqual(first.track_id, second.track_id)
+
+    def test_normalizes_board_keypoint_tensor(self):
+        output = np.zeros((1, 17, 3, 8400), dtype=np.float32)
+        normalized = _normalize_keypoint_output(output)
+        self.assertEqual((51, 8400), normalized.shape)
 
 
 if __name__ == "__main__":
