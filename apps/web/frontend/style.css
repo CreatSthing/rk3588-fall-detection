@@ -67,6 +67,23 @@ h1 {
   color: #86efac;
 }
 
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.tabs button {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.tabs button.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.95), rgba(20, 184, 166, 0.95));
+  border-color: transparent;
+  box-shadow: 0 14px 40px rgba(20, 184, 166, 0.18);
+}
+
 .grid {
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
@@ -167,6 +184,139 @@ button:disabled {
   color: #9fb3c8;
   font-size: 13px;
   margin: -6px 0 10px;
+}
+
+.resource-dashboard,
+.raw-panel {
+  grid-column: span 2;
+}
+
+.donut-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.donut-card {
+  align-items: center;
+  background: rgba(2, 6, 23, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 16px;
+  text-align: center;
+}
+
+.donut-card b {
+  font-size: 16px;
+}
+
+.donut-card small {
+  color: #9fb3c8;
+  font-size: 12px;
+}
+
+.donut {
+  align-items: center;
+  border-radius: 50%;
+  display: grid;
+  height: 104px;
+  justify-items: center;
+  position: relative;
+  width: 104px;
+}
+
+.donut::after {
+  background: #0f172a;
+  border-radius: 50%;
+  content: "";
+  height: 72px;
+  position: absolute;
+  width: 72px;
+}
+
+.donut span {
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 800;
+  position: relative;
+  z-index: 1;
+}
+
+.trend-card {
+  min-height: 220px;
+}
+
+.line-chart {
+  background:
+    linear-gradient(rgba(148, 163, 184, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    rgba(2, 6, 23, 0.35);
+  background-size: 100% 22px, 40px 100%, 100% 100%;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  height: 150px;
+  overflow: visible;
+  padding: 10px;
+  width: 100%;
+}
+
+.line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.cpu-line {
+  stroke: #22c55e;
+}
+
+.mem-line {
+  stroke: #38bdf8;
+}
+
+.npu-line {
+  stroke: #f97316;
+}
+
+.temp-line {
+  stroke: #f43f5e;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.legend span {
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.legend span::before {
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 8px;
+  margin-right: 6px;
+  width: 8px;
+}
+
+.cpu-dot::before {
+  background: #22c55e;
+}
+
+.mem-dot::before {
+  background: #38bdf8;
+}
+
+.npu-dot::before {
+  background: #f97316;
 }
 
 .core-list {
@@ -407,8 +557,14 @@ pre {
   }
 
   .hero,
-  .grid {
+  .grid,
+  .tabs {
     display: block;
+  }
+
+  .tabs button {
+    margin-bottom: 10px;
+    width: 100%;
   }
 
   .section-head,

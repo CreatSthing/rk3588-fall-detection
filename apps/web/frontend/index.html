@@ -20,8 +20,17 @@
         </div>
       </header>
 
+      <nav class="tabs">
+        <button :class="{ active: activeTab === 'cameras' }" @click="activeTab = 'cameras'">
+          摄像头管理
+        </button>
+        <button :class="{ active: activeTab === 'resources' }" @click="activeTab = 'resources'">
+          系统资源监控
+        </button>
+      </nav>
+
       <main class="grid">
-        <section class="card controls">
+        <section v-if="activeTab === 'cameras'" class="card controls">
           <h2>全局状态</h2>
           <div class="metric-row">
             <span>摄像头数量</span>
@@ -46,12 +55,45 @@
           <p v-if="message" class="message">{{ message }}</p>
         </section>
 
-        <section class="card metrics">
-          <h2>系统监控</h2>
-          <div class="metric-row">
-            <span>CPU 使用率</span>
-            <strong>{{ busyText(system.cpu.usage_percent) }}</strong>
+        <section v-if="activeTab === 'resources'" class="card resource-dashboard">
+          <div class="section-head">
+            <div>
+              <h2>系统资源总览</h2>
+              <p>环形图看当前瞬时占用，折线图看最近一段时间趋势。</p>
+            </div>
           </div>
+          <div class="donut-grid">
+            <div class="donut-card">
+              <div class="donut" :style="donutStyle(system.cpu.usage_percent)">
+                <span>{{ busyText(system.cpu.usage_percent) }}</span>
+              </div>
+              <b>CPU</b>
+            </div>
+            <div class="donut-card">
+              <div class="donut" :style="donutStyle(system.memory.used_percent)">
+                <span>{{ fmt(system.memory.used_percent, '%') }}</span>
+              </div>
+              <b>内存</b>
+              <small>{{ fmt(system.memory.used_mb, ' MB') }} / {{ fmt(system.memory.total_mb, ' MB') }}</small>
+            </div>
+            <div class="donut-card">
+              <div class="donut" :style="donutStyle(system.npu.load_percent)">
+                <span>{{ busyText(system.npu.load_percent) }}</span>
+              </div>
+              <b>NPU</b>
+              <small>{{ fmt(system.npu.freq_mhz, ' MHz') }} / {{ fmt(system.npu.temp_c, '℃') }}</small>
+            </div>
+            <div class="donut-card">
+              <div class="donut" :style="donutStyle(avgBusy(system.rga.domains))">
+                <span>{{ busyText(avgBusy(system.rga.domains)) }}</span>
+              </div>
+              <b>RGA</b>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="activeTab === 'resources'" class="card metrics">
+          <h2>CPU 每核使用率</h2>
           <div class="core-list">
             <div v-for="core in system.cpu.cores" :key="core.id" class="core-row">
               <span>{{ core.id }}</span>
@@ -61,24 +103,27 @@
               <b>{{ busyText(core.usage_percent) }}</b>
             </div>
           </div>
-          <div class="metric-row">
-            <span>内存</span>
-            <strong>{{ fmt(system.memory.used_percent, '%') }}</strong>
+        </section>
+
+        <section v-if="activeTab === 'resources'" class="card trend-card">
+          <h2>资源趋势</h2>
+          <svg class="line-chart" viewBox="0 0 320 88" preserveAspectRatio="none">
+            <polyline :points="polylinePoints(metricHistory.cpu)" class="line cpu-line"></polyline>
+            <polyline :points="polylinePoints(metricHistory.memory)" class="line mem-line"></polyline>
+            <polyline :points="polylinePoints(metricHistory.npu)" class="line npu-line"></polyline>
+          </svg>
+          <div class="legend">
+            <span class="cpu-dot">CPU</span>
+            <span class="mem-dot">内存</span>
+            <span class="npu-dot">NPU</span>
           </div>
-          <div class="metric-sub">
-            {{ fmt(system.memory.used_mb, ' MB') }} /
-            {{ fmt(system.memory.total_mb, ' MB') }}
-          </div>
-          <div class="metric-row">
-            <span>NPU 使用率</span>
-            <strong>{{ busyText(system.npu.load_percent) }}</strong>
-          </div>
-          <div class="metric-sub">
-            NPU 频率：{{ fmt(system.npu.freq_mhz, ' MHz') }} /
-            温度：{{ fmt(system.npu.temp_c, '℃') }}
-          </div>
-          <pre class="raw-watch">/sys/kernel/debug/rknpu/load
-{{ system.npu.raw_load || 'N/A' }}</pre>
+        </section>
+
+        <section v-if="activeTab === 'resources'" class="card trend-card">
+          <h2>温度趋势</h2>
+          <svg class="line-chart" viewBox="0 0 320 88" preserveAspectRatio="none">
+            <polyline :points="tempPolylinePoints(metricHistory.temp)" class="line temp-line"></polyline>
+          </svg>
           <div class="chips">
             <span v-for="temp in system.temperatures" :key="temp.name">
               {{ temp.name }} {{ temp.temp_c }}℃
@@ -86,7 +131,7 @@
           </div>
         </section>
 
-        <section class="card hardware">
+        <section v-if="activeTab === 'resources'" class="card hardware">
           <h2>MPP / RGA</h2>
           <h3>MPP 解码</h3>
           <div class="chips">
@@ -101,8 +146,6 @@
             </span>
           </div>
           <h3>RGA</h3>
-          <pre class="raw-watch">/sys/kernel/debug/rkrga/load
-{{ system.rga.debug.raw_load || 'N/A' }}</pre>
           <div class="chips">
             <span v-for="item in system.rga.domains" :key="item.name">
               {{ item.name }} {{ item.available ? busyText(item.busy_percent) : 'N/A' }}
@@ -113,7 +156,15 @@
           </div>
         </section>
 
-        <section class="card add-camera">
+        <section v-if="activeTab === 'resources'" class="card raw-panel">
+          <h2>NPU / RGA 原始输出</h2>
+          <pre class="raw-watch">/sys/kernel/debug/rknpu/load
+{{ system.npu.raw_load || 'N/A' }}</pre>
+          <pre class="raw-watch">/sys/kernel/debug/rkrga/load
+{{ system.rga.debug.raw_load || 'N/A' }}</pre>
+        </section>
+
+        <section v-if="activeTab === 'cameras'" class="card add-camera">
           <h2>添加摄像头</h2>
           <div class="add-camera-grid">
             <input v-model="newCamera.id" placeholder="ID，如 cam2" />
@@ -133,7 +184,7 @@
           </p>
         </section>
 
-        <section class="camera-grid">
+        <section v-if="activeTab === 'cameras'" class="camera-grid">
           <article v-for="camera in status.cameras" :key="camera.id" class="card detections">
             <div class="section-head">
               <div>
@@ -202,12 +253,12 @@
           </article>
         </section>
 
-        <section class="card logs">
+        <section v-if="activeTab === 'cameras'" class="card logs">
           <h2>事件日志</h2>
           <pre>{{ logs.join('\n') }}</pre>
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=raw-hw-monitor-cpu-cores-20260817"></script>
+    <script src="/static/app.js?v=resource-tabs-charts-20260817"></script>
   </body>
 </html>

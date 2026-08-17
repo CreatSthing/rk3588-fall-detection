@@ -29,6 +29,14 @@ createApp({
     const wsConnected = ref(false);
     const message = ref("");
     const logs = ref([]);
+    const activeTab = ref("cameras");
+    const metricHistory = reactive({
+      labels: [],
+      cpu: [],
+      memory: [],
+      npu: [],
+      temp: [],
+    });
     const cameraFormCache = {};
 
     const totalRunning = computed(() => status.cameras.filter((camera) => camera.running).length);
@@ -125,9 +133,26 @@ createApp({
     async function refreshSystemMetrics() {
       try {
         const response = await fetch("/api/system/metrics");
-        Object.assign(system, await response.json());
+        const payload = await response.json();
+        Object.assign(system, payload);
+        pushMetricHistory(payload);
       } catch (err) {
         appendLog(`刷新系统监控失败：${err.message}`);
+      }
+    }
+
+    function pushMetricHistory(payload) {
+      const label = new Date().toLocaleTimeString();
+      const npuTemp = Array.isArray(payload.temperatures)
+        ? payload.temperatures.find((item) => String(item.name || "").includes("npu"))
+        : null;
+      metricHistory.labels.push(label);
+      metricHistory.cpu.push(Number(payload.cpu?.usage_percent ?? 0));
+      metricHistory.memory.push(Number(payload.memory?.used_percent ?? 0));
+      metricHistory.npu.push(Number(payload.npu?.load_percent ?? 0));
+      metricHistory.temp.push(Number((npuTemp && npuTemp.temp_c) || payload.npu?.temp_c || 0));
+      for (const key of ["labels", "cpu", "memory", "npu", "temp"]) {
+        if (metricHistory[key].length > 40) metricHistory[key].shift();
       }
     }
 
@@ -223,6 +248,50 @@ createApp({
       return { width: `${percent}%` };
     }
 
+    function donutStyle(value) {
+      const percent = value === null || value === undefined ? 0 : Math.max(0, Math.min(100, Number(value)));
+      return {
+        background: `conic-gradient(#22c55e 0 ${percent}%, rgba(30, 41, 59, 0.95) ${percent}% 100%)`,
+      };
+    }
+
+    function avgBusy(items = []) {
+      const values = items
+        .map((item) => item.busy_percent)
+        .filter((value) => value !== null && value !== undefined)
+        .map(Number);
+      if (!values.length) return null;
+      return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
+    }
+
+    function polylinePoints(values = [], width = 320, height = 88, maxValue = 100) {
+      if (!values.length) return "";
+      if (values.length === 1) return `0,${height - (values[0] / maxValue) * height}`;
+      return values
+        .map((value, index) => {
+          const x = (index / (values.length - 1)) * width;
+          const y = height - (Math.max(0, Math.min(maxValue, Number(value))) / maxValue) * height;
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(" ");
+    }
+
+    function tempPolylinePoints(values = [], width = 320, height = 88) {
+      const valid = values.filter((value) => Number(value) > 0);
+      if (!valid.length) return "";
+      const min = Math.min(...valid, 20);
+      const max = Math.max(...valid, 90);
+      const range = Math.max(1, max - min);
+      if (values.length === 1) return `0,${height - ((values[0] - min) / range) * height}`;
+      return values
+        .map((value, index) => {
+          const x = (index / (values.length - 1)) * width;
+          const y = height - ((Number(value) - min) / range) * height;
+          return `${x.toFixed(1)},${Math.max(0, Math.min(height, y)).toFixed(1)}`;
+        })
+        .join(" ");
+    }
+
     function boxStyle(camera, box = {}) {
       const width = Number(camera.width) || 640;
       const height = Number(camera.height) || 360;
@@ -251,6 +320,8 @@ createApp({
       system,
       form,
       newCamera,
+      activeTab,
+      metricHistory,
       wsConnected,
       message,
       logs,
@@ -260,6 +331,10 @@ createApp({
       fmt,
       busyText,
       barStyle,
+      donutStyle,
+      avgBusy,
+      polylinePoints,
+      tempPolylinePoints,
       startPipeline,
       stopPipeline,
       startRecording,
