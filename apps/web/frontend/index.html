@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RK3588 智能摄像头控制台</title>
+    <script src="/static/vue.global.prod.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div id="app" class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">RK3588 Smart Camera</p>
+          <h1>智能摄像头控制台</h1>
+          <p class="sub">视频推流、AI 检测、结果推送和浏览器可视化闭环。</p>
+        </div>
+        <div class="status-pill" :class="{ online: wsConnected }">
+          {{ wsConnected ? '实时连接中' : '未连接' }}
+        </div>
+      </header>
+
+      <main class="grid">
+        <section class="card controls">
+          <h2>基本操作</h2>
+          <label>
+            视频源 / RTSP
+            <input v-model="form.source" placeholder="留空使用后端配置；也可填 rtsp://... 或本地视频路径" />
+          </label>
+          <label>
+            NPU Context 数
+            <input v-model.number="form.contexts" type="number" min="1" max="20" />
+          </label>
+          <label class="check">
+            <input v-model="form.dryRun" type="checkbox" />
+            使用模拟检测结果测试页面
+          </label>
+          <div class="buttons">
+            <button :disabled="status.streaming" @click="startStream">开始推流</button>
+            <button :disabled="!status.streaming" @click="stopStream">停止推流</button>
+            <button class="primary" :disabled="status.running" @click="startPipeline">启动检测</button>
+            <button :disabled="!status.running" @click="stopPipeline">停止检测</button>
+            <button :disabled="status.recording" @click="startRecording">开始录像</button>
+            <button :disabled="!status.recording" @click="stopRecording">停止录像</button>
+          </div>
+          <p v-if="message" class="message">{{ message }}</p>
+        </section>
+
+        <section class="card metrics">
+          <h2>运行状态</h2>
+          <div class="metric-row">
+            <span>推流</span>
+            <strong>{{ status.streaming ? '推流中' : '未推流' }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>检测进程</span>
+            <strong>{{ status.running ? '运行中' : '已停止' }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>录像</span>
+            <strong>{{ status.recording ? '录像中' : '未录像' }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>检测 FPS</span>
+            <strong>{{ status.fps || 0 }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>已处理帧</span>
+            <strong>{{ status.frames || 0 }}</strong>
+          </div>
+          <div class="metric-row">
+            <span>运行时长</span>
+            <strong>{{ status.uptime_sec || 0 }}s</strong>
+          </div>
+          <p v-if="status.last_error" class="error">错误：{{ status.last_error }}</p>
+        </section>
+
+        <section class="card detections">
+          <div class="section-head">
+            <div>
+              <h2>实时画面 + 检测框</h2>
+              <p>播放器：{{ form.playerUrl }}</p>
+            </div>
+            <div class="video-meta">
+              <span>RTSP: {{ rtspUrl }}</span>
+              <span>HLS: {{ hlsUrl }}</span>
+            </div>
+          </div>
+          <div class="video-shell">
+            <iframe class="video-frame" :src="form.playerUrl" allow="autoplay; fullscreen"></iframe>
+            <div class="overlay">
+              <div
+                v-for="(det, index) in latestDetections"
+                :key="index"
+                class="box"
+                :style="boxStyle(det.box)"
+              >
+                <span>{{ det.label }} {{ Math.round((det.score || 0) * 100) }}%</span>
+              </div>
+            </div>
+          </div>
+          <ul class="det-list">
+            <li v-for="(det, index) in latestDetections" :key="`row-${index}`">
+              {{ det.label }} / {{ Number(det.score || 0).toFixed(3) }} /
+              x={{ det.box?.x }}, y={{ det.box?.y }}, w={{ det.box?.w }}, h={{ det.box?.h }}
+            </li>
+          </ul>
+        </section>
+
+        <section class="card logs">
+          <h2>事件日志</h2>
+          <pre>{{ logs.join('\n') }}</pre>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

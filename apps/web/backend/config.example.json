@@ -1,0 +1,19 @@
+{
+  "pipeline_command": [
+    "/opt/rk3588-camera/current/bin/mpp_rga_thread_pool",
+    "/opt/rk3588-camera/current/assets/weights/yolov5s_raw_heads_int8.rknn",
+    "/opt/rk3588-camera/current/assets/media/c3_1080.annexb.h264",
+    "h264",
+    "8",
+    "0",
+    "0",
+    "1"
+  ],
+  "stream_command": [
+    "/opt/rk3588-camera/current/deploy/run_gst_mpp_stream.sh",
+    "/opt/rk3588-camera/current/assets/media/c3_1080.mp4",
+    "rtsp://127.0.0.1:8554/live/raw"
+  ],
+  "record_command": [],
+  "record_output_dir": "/opt/rk3588-camera/recordings"
+}

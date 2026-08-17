@@ -19,6 +19,7 @@ __pycache__/
 /.vscode/
 /.idea/
 /.agent-keys/
+/.webtest-venv/
 .DS_Store
 Thumbs.db
 

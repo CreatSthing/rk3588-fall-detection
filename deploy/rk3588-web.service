@@ -1,0 +1,28 @@
+[Unit]
+Description=RK3588 Smart Camera Web Console
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/rk3588-camera/web.env
+WorkingDirectory=/opt/rk3588-camera/current
+ExecStartPre=/usr/bin/test -x /opt/rk3588-camera/current/.venv/bin/python
+ExecStart=/opt/rk3588-camera/current/deploy/run_web.sh
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillSignal=SIGTERM
+# NOTE: MPP/RGA/RKNN access can break under overly strict systemd sandboxing
+# on the current RK3588 board image. Keep the web service functional first,
+# then tighten these options after device-node access tests are complete.
+NoNewPrivileges=no
+PrivateTmp=no
+ReadWritePaths=/var/lib/rk3588-camera /var/log/rk3588-camera /opt/rk3588-camera/current /tmp
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -3,8 +3,11 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
+#include <iostream>
 #include <numeric>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -181,11 +184,70 @@ static void write_hardware_csv(const std::string &path)
     NN_LOG_INFO("PROFILE_HW_CSV path=%s rows=%ld", hardware_path.c_str(), g_hardware_samples.size());
 }
 
+static std::string json_escape(const std::string &value)
+{
+    std::ostringstream out;
+    for (char c : value)
+    {
+        switch (c)
+        {
+        case '"': out << "\\\""; break;
+        case '\\': out << "\\\\"; break;
+        case '\b': out << "\\b"; break;
+        case '\f': out << "\\f"; break;
+        case '\n': out << "\\n"; break;
+        case '\r': out << "\\r"; break;
+        case '\t': out << "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20)
+                out << "\\u" << std::hex << static_cast<int>(c);
+            else
+                out << c;
+        }
+    }
+    return out.str();
+}
+
+static void emit_detection_json(const InferenceResult &result, int completed,
+                                const std::chrono::steady_clock::time_point &start_all)
+{
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - start_all).count();
+    const double fps = seconds > 0.0 ? static_cast<double>(completed + 1) / seconds : 0.0;
+
+    std::ostringstream out;
+    out << "{\"frame_id\":" << result.id
+        << ",\"completed\":" << completed + 1
+        << ",\"timestamp_ms\":" << static_cast<long long>(std::time(nullptr)) * 1000
+        << ",\"fps\":" << fps
+        << ",\"decode_ms\":" << result.decode_ms
+        << ",\"queue_wait_ms\":" << result.queue_wait_ms
+        << ",\"preprocess_ms\":" << result.profile.preprocess_ms
+        << ",\"npu_ms\":" << result.profile.npu_ms
+        << ",\"postprocess_ms\":" << result.profile.postprocess_ms
+        << ",\"detections\":[";
+    for (std::size_t i = 0; i < result.detections.size(); ++i)
+    {
+        const Detection &det = result.detections[i];
+        if (i > 0) out << ",";
+        out << "{\"class_id\":" << det.class_id
+            << ",\"label\":\"" << json_escape(det.className) << "\""
+            << ",\"score\":" << det.confidence
+            << ",\"box\":{\"x\":" << det.box.x
+            << ",\"y\":" << det.box.y
+            << ",\"w\":" << det.box.width
+            << ",\"h\":" << det.box.height
+            << "}}";
+    }
+    out << "]}";
+    std::cout << out.str() << std::endl;
+}
+
 int main(int argc, char **argv)
 {
-    if (argc < 3 || argc > 7)
+    if (argc < 3 || argc > 8)
     {
-        NN_LOG_ERROR("Usage: %s <model.rknn> <video> [contexts=2] [draw=0|1] [decoder=auto|software] [profile.csv]", argv[0]);
+        NN_LOG_ERROR("Usage: %s <model.rknn> <video> [contexts=2] [draw=0|1] [decoder=auto|software] [profile.csv] [json_events=0|1]", argv[0]);
         return 2;
     }
     std::string model_file = argv[1];
@@ -194,13 +256,20 @@ int main(int argc, char **argv)
     const bool draw = argc > 4 ? std::atoi(argv[4]) != 0 : false;
     const std::string decoder = argc > 5 ? argv[5] : "auto";
     const std::string profile_path = argc > 6 ? argv[6] : "";
+    const bool json_events = argc > 7 ? std::atoi(argv[7]) != 0 : false;
     if (contexts < 1 || contexts > 20)
     {
         NN_LOG_ERROR("contexts must be between 1 and 20");
         return 3;
     }
     if (decoder == "software")
-        setenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", "video_codec;h264", 1);
+    {
+        const std::string source = video_file;
+        if (source.rfind("rtsp://", 0) == 0)
+            setenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|video_codec;h264", 1);
+        else
+            setenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", "video_codec;h264", 1);
+    }
     else if (decoder != "auto")
     {
         NN_LOG_ERROR("decoder must be auto or software");
@@ -263,6 +332,8 @@ int main(int argc, char **argv)
         metric.e2e_ms = metric.decode_ms + std::chrono::duration<double, std::milli>(
             frame_end - result.enqueued_at).count();
         metrics.push_back(metric);
+        if (json_events)
+            emit_detection_json(result, completed, start);
         ++completed;
     }
     reader.join();
