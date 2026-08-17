@@ -210,6 +210,8 @@ def make_camera_config(request: CameraUpsertRequest) -> Dict[str, Any]:
             "{source}",
             "--camera-id",
             "{camera_id}",
+            "--decoder",
+            "ffmpeg-software",
         ],
         "record_command": [],
     }

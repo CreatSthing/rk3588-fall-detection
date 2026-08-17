@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from .heuristics import FallDetector, SimplePoseTracker
+from .video_source import open_video_source
 from .yolov8_pose_rknn import YoloV8PoseRKNN
 
 
@@ -146,9 +147,7 @@ def detection_json(detection, action: str, features: Dict[str, object]) -> Dict[
 
 
 def run(args: argparse.Namespace) -> int:
-    capture = cv2.VideoCapture(parse_source(args.source))
-    if not capture.isOpened():
-        raise RuntimeError(f"cannot open video source: {args.source}")
+    capture = open_video_source(parse_source(args.source), args.decoder, args.record_fps)
     tracker = SimplePoseTracker(iou_threshold=args.track_iou, max_missed=args.max_missed)
     fall_detector = FallDetector(
         confirm_seconds=args.confirm_seconds,
@@ -158,9 +157,7 @@ def run(args: argparse.Namespace) -> int:
     )
     output_dir = Path(args.event_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    source_fps = capture.get(cv2.CAP_PROP_FPS)
-    if source_fps <= 0 or source_fps > 60:
-        source_fps = args.record_fps
+    source_fps = capture.fps
     clip_buffer = EventClipBuffer(output_dir, source_fps, args.pre_event_seconds, args.post_event_seconds)
     frame_id = 0
     started_at = time.monotonic()
@@ -240,6 +237,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pre-event-seconds", type=float, default=5.0)
     parser.add_argument("--post-event-seconds", type=float, default=10.0)
     parser.add_argument("--record-fps", type=float, default=15.0)
+    parser.add_argument(
+        "--decoder",
+        choices=("auto", "opencv", "ffmpeg-software"),
+        default="auto",
+        help="auto uses FFmpeg software decoding for network streams to avoid RKMPP/RGA stride failures",
+    )
     return parser
 
 

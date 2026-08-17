@@ -23,7 +23,9 @@
         "--source",
         "{source}",
         "--camera-id",
-        "{camera_id}"
+        "{camera_id}",
+        "--decoder",
+        "ffmpeg-software"
       ],
       "record_command": []
     }
