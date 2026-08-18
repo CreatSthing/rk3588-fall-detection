@@ -78,3 +78,10 @@
 - 为什么改：无关代码扩大仓库体积和维护面，还会让部署人员误用旧模型或旧服务。
 - 具体做法：删除旧 C++ 工程及其专用资产、工具、部署文件和文档；清理后端兼容分支；重写 README 和项目结构说明；安装与验收脚本统一检查当前 INT8 姿态模型。
 - 改进效果：仓库只保留 Python YOLOv8-Pose 跌倒检测链路，目录边界、默认模型和部署说明与当前板端一致；Python 测试结果见本次变更验证记录。
+
+## 2026-08-18｜增加 RK3588 原生 Docker 部署
+
+- 原先表现：部署需要在板端手工创建 venv、安装依赖和维护 systemd，迁移或重装步骤较多。
+- 为什么改：Python 依赖适合固化在镜像中，但 NPU 内核驱动、RKNN Runtime 和 MediaMTX 仍应由 RK3588 宿主提供。
+- 具体做法：增加 ARM64 Ubuntu 20.04 镜像、Compose 和启动检查；挂载模型、运行数据、`librknnrt.so`、`/dev/dri` 与 debugfs，并使用 host network 复用宿主 MediaMTX。
+- 改进效果：可用 `docker compose up -d --build` 完成构建和启动；镜像导入、NPU 设备和完整实时管线仍需在开发板验证。

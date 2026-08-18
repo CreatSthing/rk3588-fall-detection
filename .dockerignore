@@ -1,0 +1,13 @@
+.git
+.gitignore
+.runtime
+.webtest-venv
+__pycache__
+*.pyc
+*.log
+assets/calibration
+assets/media
+assets/weights
+docs
+media
+tests

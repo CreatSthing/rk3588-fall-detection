@@ -123,6 +123,28 @@ http://开发板IP:8000
 python -m unittest discover -s tests -v
 ```
 
+## Docker 部署
+
+Docker 只在 RK3588 板端构建和运行；宿主机仍需提供 NPU 驱动、RKNN Runtime 2.3.2 和 MediaMTX。
+
+将 RKNNLite wheel 放入 `vendor/`、模型放入 `assets/weights/`，然后执行：
+
+```bash
+sudo systemctl disable --now rk3588-web
+docker compose up -d --build
+docker compose ps
+docker compose logs -f
+```
+
+首次启动会创建 `/var/lib/rk3588-camera/web.json`。已有配置和录像目录会直接复用；如需恢复 systemd 部署：
+
+```bash
+docker compose down
+sudo systemctl enable --now rk3588-web
+```
+
+容器使用 host network 访问宿主 MediaMTX，并挂载 `/dev/dri`、`/usr/lib/librknnrt.so` 和 debugfs。当前为单机可信环境使用 `privileged`；不要把该配置直接用于多租户服务器。
+
 ## 数据位置
 
 | 内容 | 板端位置 |

@@ -1,0 +1,32 @@
+services:
+  fall-detection:
+    image: rk3588-fall-detection:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rk3588-fall-detection
+    platform: linux/arm64
+    privileged: true
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+      RK3588_APP_ROOT: /app
+      RK3588_WEB_CONFIG: /var/lib/rk3588-camera/web.json
+      RK3588_EVENT_DIR: /var/lib/rk3588-camera/events
+      RK3588_EVENT_DB: /var/lib/rk3588-camera/events/events.db
+      RK3588_MANUAL_RECORD_DIR: /var/lib/rk3588-camera/recordings
+    volumes:
+      - ./assets/weights:/app/assets/weights:ro
+      - /var/lib/rk3588-camera:/var/lib/rk3588-camera
+      - /usr/lib/librknnrt.so:/usr/lib/librknnrt.so:ro
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /dev/dri:/dev/dri
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/status', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
