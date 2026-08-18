@@ -127,11 +127,12 @@ python -m unittest discover -s tests -v
 
 Docker 只在 RK3588 板端构建和运行；宿主机仍需提供 NPU 驱动、RKNN Runtime 2.3.2 和 MediaMTX。
 
-将 RKNNLite wheel 放入 `vendor/`、模型放入 `assets/weights/`，然后执行：
+将 RKNNLite、NumPy ARM64 wheel 放入 `vendor/`，模型放入 `assets/weights/`。先构建成功再切换服务：
 
 ```bash
+docker compose build
 sudo systemctl disable --now rk3588-web
-docker compose up -d --build
+docker compose up -d
 docker compose ps
 docker compose logs -f
 ```

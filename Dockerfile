@@ -25,7 +25,11 @@ COPY apps/web/backend/requirements.txt /tmp/web-requirements.txt
 COPY apps/fall_detection/requirements.txt /tmp/fall-requirements.txt
 COPY vendor/ /tmp/vendor/
 
-RUN python3 -m pip install --no-cache-dir --upgrade "pip<25" setuptools wheel \
+RUN python3 -m pip install --no-cache-dir --upgrade "pip<25" setuptools wheel
+
+RUN numpy_wheel="$(find /tmp/vendor -maxdepth 1 -type f -name 'numpy-*aarch64.whl' | sort | tail -n 1)" \
+    && test -n "$numpy_wheel" \
+    && python3 -m pip install --no-cache-dir "$numpy_wheel" \
     && python3 -m pip install --no-cache-dir \
         -r /tmp/web-requirements.txt \
         -r /tmp/fall-requirements.txt \
@@ -36,7 +40,12 @@ RUN python3 -m pip install --no-cache-dir --upgrade "pip<25" setuptools wheel \
 
 COPY . /app
 
-RUN chmod +x /app/deploy/docker-entrypoint.sh /app/deploy/run_gst_mpp_stream.sh
+RUN sed -i 's/\r$//' \
+        /app/deploy/docker-entrypoint.sh \
+        /app/deploy/run_gst_mpp_stream.sh \
+    && chmod +x \
+        /app/deploy/docker-entrypoint.sh \
+        /app/deploy/run_gst_mpp_stream.sh
 
 EXPOSE 8000
 
