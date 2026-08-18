@@ -53,6 +53,7 @@ if [ ! -f "$data_dir/web.json" ]; then
         install -m 0640 "$app_root/apps/web/backend/config.example.json" "$data_dir/web.json"
     fi
 fi
+python3 "$app_root/deploy/rewrite_config_paths.py" systemd "$data_dir/web.json" "$app_root"
 chown "$service_user:$service_group" "$data_dir/web.json"
 
 python3 -m venv --system-site-packages "$app_root/.venv"

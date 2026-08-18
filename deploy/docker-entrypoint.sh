@@ -14,6 +14,7 @@ if [ ! -f "$config_path" ]; then
     sed "s#/opt/rk3588-camera/current#$app_root#g" \
         "$app_root/apps/web/backend/config.example.json" > "$config_path"
 fi
+python3 "$app_root/deploy/rewrite_config_paths.py" docker "$config_path"
 
 if [ ! -s "$model_path" ]; then
     echo "Missing RKNN model: $model_path" >&2
