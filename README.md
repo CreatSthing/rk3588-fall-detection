@@ -23,9 +23,9 @@ RTSP 摄像头 → FFmpeg 解码 → YOLOv8n-Pose RKNN
 
 在 Orange Pi 5 Ultra、640×360 @ 20 FPS 摄像头上，当前 INT8 模型实时处理约 19 FPS。272帧跌倒视频中检出271帧并触发一次告警；INT8 NPU 耗时约32.7 ms，FP16约72.1 ms。完整结果见 [`deploy/fall-model-manifest.json`](deploy/fall-model-manifest.json)。
 
-<video src="media/README/fall-alarm-demo.mp4" controls></video>
+[![跌倒报警演示](media/README/fall-alarm-demo.gif)](media/README/fall-alarm-demo.mp4?raw=1)
 
-[查看跌倒报警演示](media/README/fall-alarm-demo.mp4)
+点击动图可打开或下载原始 MP4。
 
 ![Web 控制台](media/README/image-20260818002558850.png)
 
