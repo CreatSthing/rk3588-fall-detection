@@ -1,19 +1,8 @@
-# Build outputs
-/build/
-/build-pc/
-/build-rk3588-vm/
-/cmake-build-*/
+# Python and generated outputs
 /output/
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-*.o
-*.obj
-*.dll
-*.dylib
 __pycache__/
 *.pyc
+.venv/
 
 # IDE and system files
 /.vscode/
@@ -32,16 +21,8 @@ Thumbs.db
 /assets/models/
 *.onnx
 
-# Bundled third-party SDKs and prebuilt libraries
-/3rdparty/opencv/
-/3rdparty/ffmpeg/
-/3rdparty/ffmpeg/**/lib/
-/mpp_libs/*.so
-/mpp_libs/*.a
-/mpp_libs/
-/librknn_api/armhf/*.so
-/librknn_api/aarch64/*.so
-/3rdparty/rga/**/lib/
+# Local runtime package
+/vendor/*.whl
 
 # Runtime artifacts
 /.runtime/

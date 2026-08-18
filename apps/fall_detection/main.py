@@ -180,6 +180,7 @@ def run(args: argparse.Namespace) -> int:
         recover_seconds=args.recover_seconds,
         cooldown_seconds=args.cooldown_seconds,
         descent_threshold=args.descent_threshold,
+        alarm_threshold=args.alarm_threshold,
     )
     output_dir = Path(args.event_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -187,6 +188,7 @@ def run(args: argparse.Namespace) -> int:
     clip_buffer = EventClipBuffer(output_dir, source_fps, args.pre_event_seconds, args.post_event_seconds)
     frame_id = 0
     started_at = time.monotonic()
+    timing_ema: Dict[str, float] = {}
     timeline_started_at = time.time()
     source_is_live = isinstance(parse_source(args.source), int) or is_network_source(args.source)
 
@@ -197,13 +199,18 @@ def run(args: argparse.Namespace) -> int:
             nms_threshold=args.nms_threshold,
         ) as pose_model:
             while True:
+                frame_started = time.perf_counter()
                 ok, frame = capture.read()
                 if not ok:
                     break
+                read_finished = time.perf_counter()
                 frame_id += 1
                 now = time.time() if source_is_live else timeline_started_at + (frame_id - 1) / max(source_fps, 1.0)
                 clip_updates = clip_buffer.add_frame(now, frame)
-                poses = tracker.update(pose_model.infer(frame), timestamp=now)
+                buffer_finished = time.perf_counter()
+                inferred = pose_model.infer(frame)
+                inference_finished = time.perf_counter()
+                poses = tracker.update(inferred, timestamp=now)
                 detections: List[Dict[str, object]] = []
                 events: List[Dict[str, object]] = []
                 for pose in poses:
@@ -219,6 +226,16 @@ def run(args: argparse.Namespace) -> int:
                         events.append(event)
                 events.extend(clip_updates)
                 fall_detector.prune(tracker.tracks.keys())
+                processing_finished = time.perf_counter()
+                raw_timings = {
+                    "source_read": (read_finished - frame_started) * 1000.0,
+                    "recording_buffer": (buffer_finished - read_finished) * 1000.0,
+                    **pose_model.last_timings_ms,
+                    "tracking_rules": (processing_finished - inference_finished) * 1000.0,
+                    "frame_total": (processing_finished - frame_started) * 1000.0,
+                }
+                for name, value in raw_timings.items():
+                    timing_ema[name] = value if name not in timing_ema else timing_ema[name] * 0.9 + value * 0.1
                 elapsed = max(time.monotonic() - started_at, 1e-6)
                 payload = {
                     "camera_id": args.camera_id,
@@ -226,6 +243,7 @@ def run(args: argparse.Namespace) -> int:
                     "timestamp": now,
                     "fps": round(frame_id / elapsed, 2),
                     "source_frames_dropped": int(getattr(capture, "dropped_frames", 0)),
+                    "timings_ms": {name: round(value, 2) for name, value in timing_ema.items()},
                     "width": int(frame.shape[1]),
                     "height": int(frame.shape[0]),
                     "detections": detections,
@@ -263,6 +281,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-seconds", type=float, default=0.7)
     parser.add_argument("--recover-seconds", type=float, default=2.0)
     parser.add_argument("--cooldown-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--alarm-threshold",
+        type=float,
+        default=0.5,
+        help="emit a fall alarm only when the fall confidence is strictly greater than this value",
+    )
     parser.add_argument(
         "--descent-threshold",
         type=float,

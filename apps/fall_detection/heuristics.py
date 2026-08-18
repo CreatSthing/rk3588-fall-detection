@@ -158,12 +158,14 @@ class FallDetector:
         cooldown_seconds: float = 30.0,
         keypoint_threshold: float = 0.25,
         descent_threshold: float = 0.22,
+        alarm_threshold: float = 0.5,
     ):
         self.confirm_seconds = confirm_seconds
         self.recover_seconds = recover_seconds
         self.cooldown_seconds = cooldown_seconds
         self.keypoint_threshold = keypoint_threshold
         self.descent_threshold = descent_threshold
+        self.alarm_threshold = max(0.0, min(float(alarm_threshold), 1.0))
         self.states: Dict[int, FallState] = {}
         self.history: Dict[int, Deque[Tuple[float, float, float, float]]] = {}
 
@@ -291,7 +293,11 @@ class FallDetector:
                 state.phase = "candidate"
                 state.candidate_since = now
             elif state.phase == "candidate" and state.candidate_since is not None:
-                if now - state.candidate_since >= self.confirm_seconds and now - state.last_alert_at >= self.cooldown_seconds:
+                if (
+                    now - state.candidate_since >= self.confirm_seconds
+                    and now - state.last_alert_at >= self.cooldown_seconds
+                    and float(features["score"]) > self.alarm_threshold
+                ):
                     state.phase = "fallen"
                     state.last_alert_at = now
                     state.event_id = uuid.uuid4().hex

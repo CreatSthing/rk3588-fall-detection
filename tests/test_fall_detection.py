@@ -54,6 +54,27 @@ class FallDetectorTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual("confirmed", event["state"])
 
+    def test_alarm_confidence_must_exceed_configured_threshold(self):
+        detector = FallDetector(
+            confirm_seconds=0.5,
+            descent_threshold=0.35,
+            cooldown_seconds=10,
+            alarm_threshold=1.0,
+        )
+        events = []
+        samples = [
+            (0.0, pose((100, 50, 80, 240), 210, False)),
+            (0.2, pose((100, 90, 100, 210), 250, False)),
+            (0.4, pose((90, 180, 230, 100), 285, True)),
+            (0.7, pose((90, 180, 230, 100), 287, True)),
+            (1.0, pose((90, 180, 230, 100), 287, True)),
+        ]
+        for timestamp, detection in samples:
+            _, _, event = detector.update(detection, timestamp)
+            if event:
+                events.append(event)
+        self.assertEqual([], events)
+
     def test_does_not_alarm_for_person_already_lying(self):
         detector = FallDetector(confirm_seconds=0.2)
         events = []

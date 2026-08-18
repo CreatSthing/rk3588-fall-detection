@@ -51,6 +51,8 @@ POST /api/cameras/{camera_id}/pipeline/start
 POST /api/cameras/{camera_id}/pipeline/stop
 POST /api/cameras/{camera_id}/recording/start
 POST /api/cameras/{camera_id}/recording/stop
+GET  /api/cameras/{camera_id}/recordings
+GET  /api/cameras/{camera_id}/recordings/{filename}
 
 # 兼容旧版单路接口，默认映射到 cam1
 PUT  /api/pipeline
@@ -65,7 +67,10 @@ WS   /ws/detections
 GET  /api/events
 POST /api/cameras/{camera_id}/fall-events
 POST /api/events/{event_id}/acknowledge
+DELETE /api/events/{event_id}
 GET  /api/events/{event_id}/video
+GET  /api/alarm-settings
+PUT  /api/alarm-settings
 ```
 
 跌倒检测与录像的完整说明见 [`fall-detection.md`](fall-detection.md)。

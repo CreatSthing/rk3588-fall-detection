@@ -21,10 +21,7 @@
 
 ## SSH 连接记录
 
-- RK3588 开发板：Orange Pi 5 Ultra，`root@192.168.207.201`（热点 DHCP 地址，可能变化）
+- RK3588 开发板：Orange Pi 5 Ultra，`root@192.168.102.201`（热点 DHCP 地址，可能变化）
 - RK3588 私钥：`C:\Users\LY\.ssh\codex_rk3588_rsa`
 - RK3588 连接说明：`../RK3588板卡连接说明.md`
-- VMware Ubuntu root 私钥路径：`E:\deskTop\develop\项目\基于RK3588的智能摄像头\yolov5_stream\.agent-keys\rk3588_vm_root_ed25519`
-- 目标主机：`root@192.168.113.134`
-- 静态 IP 与 VMware 共享目录持久化配置见：`docs/vm-ubuntu-setup.md`
 - 注意：`.agent-keys/` 已加入 `.gitignore`，不要提交私钥内容。

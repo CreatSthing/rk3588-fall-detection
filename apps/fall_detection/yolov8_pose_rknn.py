@@ -7,6 +7,7 @@ for this project.
 
 from __future__ import annotations
 
+import time
 from typing import List, Sequence, Tuple
 
 import numpy as np
@@ -79,6 +80,7 @@ class YoloV8PoseRKNN:
         self.object_threshold = object_threshold
         self.nms_threshold = nms_threshold
         self.input_size = input_size
+        self.last_timings_ms = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
         self.rknn = RKNNLite()
         ret = self.rknn.load_rknn(model_path)
         if ret != 0:
@@ -169,9 +171,12 @@ class YoloV8PoseRKNN:
     def infer(self, image: np.ndarray) -> List[PoseDetection]:
         import cv2
 
+        started = time.perf_counter()
         model_image, scale, offset_x, offset_y = self._letterbox(image)
         rgb = cv2.cvtColor(model_image, cv2.COLOR_BGR2RGB)
+        inference_started = time.perf_counter()
         outputs = self.rknn.inference(inputs=[rgb[np.newaxis, ...]], data_format=["nhwc"])
+        inference_finished = time.perf_counter()
         if outputs is None:
             raise RuntimeError("RKNN inference returned no outputs")
         boxes, scores, keypoints = self._decode(outputs)
@@ -190,4 +195,10 @@ class YoloV8PoseRKNN:
                 score=float(score),
                 keypoints=[(float(x), float(y), float(confidence)) for x, y, confidence in points],
             ))
+        finished = time.perf_counter()
+        self.last_timings_ms = {
+            "preprocess": round((inference_started - started) * 1000.0, 2),
+            "npu": round((inference_finished - inference_started) * 1000.0, 2),
+            "postprocess": round((finished - inference_finished) * 1000.0, 2),
+        }
         return detections

@@ -50,6 +50,10 @@ class CameraUpsertRequest(BaseModel):
     decoder: str = "software"
 
 
+class AlarmSettingsRequest(BaseModel):
+    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class FallEventRequest(BaseModel):
     id: Optional[str] = None
     event_type: str = "fall"
@@ -79,6 +83,7 @@ class CameraRuntime:
     pipeline_task: Optional[asyncio.Task] = None
     simulator_task: Optional[asyncio.Task] = None
     record_process: Optional[asyncio.subprocess.Process] = None
+    record_output_path: Optional[str] = None
     stream_process: Optional[asyncio.subprocess.Process] = None
 
 
@@ -136,6 +141,35 @@ def event_output_dir() -> Path:
     return ROOT_DIR / ".runtime" / "events"
 
 
+def manual_recording_dir() -> Path:
+    configured = os.getenv("RK3588_MANUAL_RECORD_DIR") or load_config().get("manual_record_output_dir")
+    if configured:
+        return Path(str(configured))
+    if os.name == "posix":
+        return Path("/var/lib/rk3588-camera/recordings")
+    return ROOT_DIR / ".runtime" / "recordings"
+
+
+def manual_recordings(camera_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    directory = manual_recording_dir()
+    if not directory.is_dir():
+        return []
+    camera_token = f"-{_safe_filename(camera_id)}-"
+    items = []
+    for path in directory.glob("*.mp4"):
+        if camera_token not in path.name or not path.is_file() or path.stat().st_size <= 0:
+            continue
+        stat = path.stat()
+        items.append({
+            "filename": path.name,
+            "size_bytes": stat.st_size,
+            "modified_at": stat.st_mtime,
+            "url": f"/api/cameras/{camera_id}/recordings/{path.name}",
+        })
+    items.sort(key=lambda item: item["modified_at"], reverse=True)
+    return items[:max(1, min(limit, 100))]
+
+
 def event_repository() -> EventRepository:
     configured = os.getenv("RK3588_EVENT_DB")
     path = Path(configured) if configured else event_output_dir() / "events.db"
@@ -143,6 +177,54 @@ def event_repository() -> EventRepository:
     if key not in _event_repositories:
         _event_repositories[key] = EventRepository(path)
     return _event_repositories[key]
+
+
+def reconcile_interrupted_recordings() -> int:
+    repository = event_repository()
+    reconciled = 0
+    allowed = event_output_dir().resolve()
+    ffprobe = shutil.which("ffprobe")
+    for event in repository.incomplete_recordings():
+        video_path = event.get("video_path")
+        path = Path(str(video_path)).resolve() if video_path else None
+        valid_path = False
+        if path is not None:
+            try:
+                valid_path = os.path.commonpath([str(path), str(allowed)]) == str(allowed)
+            except ValueError:
+                valid_path = False
+        ready = False
+        if valid_path and path is not None and path.is_file() and path.stat().st_size > 0 and ffprobe:
+            try:
+                result = subprocess.run(
+                    [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                ready = result.returncode == 0 and float(result.stdout.strip() or 0) > 0
+            except (OSError, subprocess.TimeoutExpired, ValueError):
+                ready = False
+        if ready:
+            repository.set_recording(event["id"], "ready", str(path))
+        else:
+            repository.set_recording(
+                event["id"],
+                "failed",
+                str(path) if valid_path and path is not None else None,
+                "录像被服务重启中断",
+            )
+        reconciled += 1
+    return reconciled
+
+
+def fall_alarm_threshold() -> float:
+    value = load_config().get("fall_alarm_confidence_threshold", 0.5)
+    try:
+        return max(0.0, min(float(value), 1.0))
+    except (TypeError, ValueError):
+        return 0.5
 
 
 def normalize_camera_config(config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -205,7 +287,7 @@ def make_camera_config(request: CameraUpsertRequest) -> Dict[str, Any]:
             "-m",
             "apps.fall_detection.main",
             "--model",
-            "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-fp16.rknn",
+            "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-int8-calibrated-20260818.rknn",
             "--source",
             "{source}",
             "--camera-id",
@@ -215,6 +297,38 @@ def make_camera_config(request: CameraUpsertRequest) -> Dict[str, Any]:
         ],
         "record_command": [],
     }
+
+
+def camera_source_url(camera: Dict[str, Any]) -> str:
+    source_url = str(camera.get("source_url") or "")
+    stream_command = camera.get("stream_command")
+    if not source_url and isinstance(stream_command, list) and len(stream_command) >= 2:
+        source_url = str(stream_command[1])
+    return source_url
+
+
+def update_camera_config(camera: Dict[str, Any], request: CameraUpsertRequest) -> Dict[str, Any]:
+    """Update browser-managed fields without discarding deployment-specific settings."""
+    updated = dict(camera)
+    updated.update(
+        {
+            "id": request.id,
+            "name": request.name or request.id,
+            "width": request.width,
+            "height": request.height,
+            "contexts": request.contexts,
+            "decoder": request.decoder,
+            "source_url": request.source_url,
+        }
+    )
+    stream_command = list(updated.get("stream_command") or [])
+    if len(stream_command) >= 2:
+        stream_command[1] = request.source_url
+        updated["stream_command"] = stream_command
+    else:
+        generated = make_camera_config(request)
+        updated["stream_command"] = generated["stream_command"]
+    return updated
 
 
 def get_camera_config(camera_id: str) -> Dict[str, Any]:
@@ -246,10 +360,17 @@ def build_pipeline_command(camera: Dict[str, Any], request: StartRequest) -> Lis
     elif request.source and len(command) >= 3:
         command[2] = request.source
     if request.contexts is not None:
-        exe_name = Path(command[0]).name
-        context_index = 3 if exe_name == "yolov5_thread_pool" else 4
+        context_index = 4
         if not had_placeholders and len(command) > context_index:
             command[context_index] = str(request.contexts)
+    if "apps.fall_detection.main" in command:
+        threshold = str(camera.get("fall_alarm_confidence_threshold", fall_alarm_threshold()))
+        if "--alarm-threshold" in command:
+            threshold_index = command.index("--alarm-threshold") + 1
+            if threshold_index < len(command):
+                command[threshold_index] = threshold
+        else:
+            command += ["--alarm-threshold", threshold]
     stdbuf = shutil.which("stdbuf")
     if stdbuf:
         command = [stdbuf, "-oL", "-eL"] + command
@@ -259,16 +380,25 @@ def build_pipeline_command(camera: Dict[str, Any], request: StartRequest) -> Lis
 def public_camera_state(camera_id: str) -> Dict[str, Any]:
     camera = get_camera_config(camera_id)
     runtime = get_camera_state(camera_id)
+    if runtime.record_process is not None and runtime.record_process.returncode is not None:
+        runtime.record_process = None
+        runtime.recording = False
     return {
         "id": camera_id,
         "name": camera.get("name", camera_id),
         "width": int(camera.get("width") or 640),
         "height": int(camera.get("height") or 360),
+        "source_url": camera_source_url(camera),
+        "configured_contexts": int(camera.get("contexts") or 1),
+        "decoder": camera.get("decoder", "software"),
         "player_url": camera.get("player_url"),
         "rtsp_url": camera.get("rtsp_url"),
         "hls_url": camera.get("hls_url"),
         "running": runtime.running,
         "recording": runtime.recording,
+        "recording_path": runtime.record_output_path,
+        "recording_directory": str(manual_recording_dir()),
+        "manual_recordings": manual_recordings(camera_id, limit=5),
         "started_at": runtime.started_at,
         "uptime_sec": round(time.time() - runtime.started_at, 3) if runtime.started_at else 0,
         "source": runtime.source,
@@ -333,6 +463,27 @@ def build_event_record_command(camera: Dict[str, Any], output_path: Path, durati
     return command
 
 
+def build_manual_record_command(camera: Dict[str, Any], output_path: Path) -> List[str]:
+    source = str(camera.get("rtsp_url") or camera.get("source_url") or "")
+    configured = list(camera.get("record_command") or [])
+    if configured:
+        replacements = {"{source}": source, "{output}": str(output_path)}
+        return [replacements.get(str(item), str(item)) for item in configured]
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found and record_command is not configured")
+    if not source:
+        raise RuntimeError("camera has no rtsp_url/source_url for manual recording")
+    command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    if source.lower().startswith("rtsp://"):
+        command += ["-rtsp_transport", "tcp"]
+    command += [
+        "-i", source, "-map", "0:v:0", "-an", "-c:v", "copy",
+        "-movflags", "+frag_keyframe+empty_moov+default_base_moof", str(output_path),
+    ]
+    return command
+
+
 async def record_fall_event(event_id: str, camera_id: str) -> None:
     repository = event_repository()
     config = load_config()
@@ -382,6 +533,13 @@ async def process_fall_event(camera_id: str, raw_event: Dict[str, Any]) -> Dict[
     event["timestamp"] = float(event.get("timestamp") or time.time())
     event["state"] = str(event.get("state") or "confirmed")
     existing = event_repository().get(event["id"])
+    confidence = float(event.get("confidence") or 0.0)
+    if existing is None and event["state"] == "confirmed" and confidence <= fall_alarm_threshold():
+        event["suppressed"] = True
+        return event
+    if existing is None and event["state"] == "recovered":
+        event["suppressed"] = True
+        return event
     supplied_video = event.get("video_path")
     supplied_status = event.get("recording_status")
     # A late "recording ready" update can arrive after the person recovered.
@@ -576,6 +734,42 @@ async def stop_process(process: Optional[asyncio.subprocess.Process]) -> None:
         await process.wait()
 
 
+async def wait_for_video_source(source: str, timeout_sec: float = 15.0) -> None:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise HTTPException(status_code=500, detail="ffprobe is required to verify the camera stream")
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        process = await asyncio.create_subprocess_exec(
+            ffprobe,
+            "-v", "error",
+            "-rtsp_transport", "tcp",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            source,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            output, _ = await asyncio.wait_for(process.communicate(), timeout=3.0)
+            return_code = process.returncode
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            output = b""
+            return_code = -1
+        if return_code == 0:
+            try:
+                width, height = (int(value) for value in output.decode().strip().split(",", 1))
+                if width > 0 and height > 0:
+                    return
+            except (UnicodeDecodeError, ValueError):
+                pass
+        await asyncio.sleep(0.5)
+    raise HTTPException(status_code=504, detail=f"camera stream did not become ready within {timeout_sec:g}s")
+
+
 def read_text(path: str) -> Optional[str]:
     try:
         return Path(path).read_text(encoding="utf-8", errors="replace").strip()
@@ -758,6 +952,10 @@ def debug_npu_metric() -> Dict[str, Any]:
     if debug_load is not None:
         metric["load_percent"] = debug_load
         metric["available"] = True
+    else:
+        # Rockchip devfreq load can be `100@1000000000Hz`; it is not the
+        # per-core utilization sample and must not become a false 100% gauge.
+        metric["load_percent"] = None
     if debug_freq is not None:
         metric["freq_mhz"] = round(debug_freq / 1_000_000, 1) if debug_freq > 100000 else debug_freq
     if debug_power is not None:
@@ -860,6 +1058,79 @@ async def get_events(limit: int = 100, camera_id: Optional[str] = None) -> Dict[
     return {"events": event_repository().list(limit=limit, camera_id=camera_id)}
 
 
+@app.get("/api/cameras/{camera_id}/recordings")
+async def get_manual_recordings(camera_id: str, limit: int = 20) -> Dict[str, Any]:
+    get_camera_config(camera_id)
+    return {
+        "directory": str(manual_recording_dir()),
+        "recordings": manual_recordings(camera_id, limit=limit),
+    }
+
+
+@app.get("/api/cameras/{camera_id}/recordings/{filename}")
+async def get_manual_recording(camera_id: str, filename: str) -> FileResponse:
+    get_camera_config(camera_id)
+    if Path(filename).name != filename or not filename.endswith(".mp4"):
+        raise HTTPException(status_code=400, detail="invalid recording filename")
+    if f"-{_safe_filename(camera_id)}-" not in filename:
+        raise HTTPException(status_code=403, detail="recording does not belong to this camera")
+    path = (manual_recording_dir() / filename).resolve()
+    allowed = manual_recording_dir().resolve()
+    try:
+        if os.path.commonpath([str(path), str(allowed)]) != str(allowed):
+            raise HTTPException(status_code=403, detail="recording path is outside the manual recording directory")
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="invalid recording path") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="recording file is missing")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        headers={"Content-Disposition": f'inline; filename="{path.name}"'},
+    )
+
+
+@app.get("/api/alarm-settings")
+async def get_alarm_settings() -> Dict[str, Any]:
+    return {
+        "confidence_threshold": fall_alarm_threshold(),
+        "recording_enabled": bool(load_config().get("event_recording_enabled", True)),
+        "recording_directory": str(event_output_dir()),
+    }
+
+
+@app.put("/api/alarm-settings", response_model=CommandResponse)
+async def update_alarm_settings(request: AlarmSettingsRequest) -> CommandResponse:
+    running = []
+    for camera_id in camera_configs():
+        runtime = get_camera_state(camera_id)
+        if runtime.running:
+            running.append((camera_id, runtime.simulator_task is not None, runtime.contexts))
+            await stop_camera_pipeline(camera_id)
+    config = load_config()
+    config["fall_alarm_confidence_threshold"] = request.confidence_threshold
+    save_config(config)
+    try:
+        for camera_id, simulated, contexts in running:
+            camera = get_camera_config(camera_id)
+            await start_camera_pipeline(
+                camera_id,
+                StartRequest(
+                    contexts=contexts or int(camera.get("contexts") or 1),
+                    dry_run=simulated,
+                ),
+            )
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"alarm threshold saved, but detection restart failed: {exc.detail}",
+        ) from exc
+    return CommandResponse(
+        ok=True,
+        message=f"alarm confidence threshold updated: {request.confidence_threshold:.0%}",
+    )
+
+
 @app.post("/api/cameras/{camera_id}/fall-events")
 async def ingest_fall_event(camera_id: str, request: FallEventRequest) -> Dict[str, Any]:
     get_camera_config(camera_id)
@@ -876,6 +1147,32 @@ async def acknowledge_event(event_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"event not found: {event_id}") from exc
     await broadcast({"type": "alarm_update", "camera_id": event["camera_id"], "payload": event})
     return {"ok": True, "event": event}
+
+
+@app.delete("/api/events/{event_id}")
+async def delete_event(event_id: str) -> Dict[str, Any]:
+    event = event_repository().get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail=f"event not found: {event_id}")
+    if event.get("recording_status") in {"pending", "recording"}:
+        raise HTTPException(status_code=409, detail="wait for event recording to finish before deleting")
+    video_path = event.get("video_path")
+    if video_path:
+        path = Path(str(video_path)).resolve()
+        allowed = event_output_dir().resolve()
+        try:
+            if os.path.commonpath([str(path), str(allowed)]) != str(allowed):
+                raise HTTPException(status_code=403, detail="event video path is outside the recording directory")
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="invalid event video path") from exc
+        if path.exists():
+            path.unlink()
+    try:
+        deleted = event_repository().delete(event_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"event not found: {event_id}") from exc
+    await broadcast({"type": "alarm_deleted", "camera_id": deleted["camera_id"], "payload": {"id": event_id}})
+    return {"ok": True, "message": "alarm event and recording deleted", "id": event_id}
 
 
 @app.get("/api/events/{event_id}/video")
@@ -918,11 +1215,39 @@ async def update_camera(camera_id: str, request: CameraUpsertRequest) -> Command
     cameras = list(normalize_camera_config(config))
     for index, camera in enumerate(cameras):
         if str(camera.get("id")) == camera_id:
-            cameras[index] = make_camera_config(request)
+            runtime = get_camera_state(camera_id)
+            if runtime.recording:
+                raise HTTPException(status_code=409, detail="stop recording before updating camera")
+            was_streaming = runtime.stream_process is not None and runtime.stream_process.returncode is None
+            was_running = runtime.running
+            was_simulated = runtime.simulator_task is not None
+            if was_running:
+                await stop_camera_pipeline(camera_id)
+            if was_streaming:
+                await stop_camera_stream(camera_id)
+
+            cameras[index] = update_camera_config(camera, request)
             config["cameras"] = cameras
             save_config(config)
+
+            try:
+                if was_streaming:
+                    await start_camera_stream(camera_id)
+                    if was_running and not was_simulated:
+                        await wait_for_video_source(str(get_camera_config(camera_id).get("rtsp_url") or ""))
+                if was_running:
+                    await start_camera_pipeline(
+                        camera_id,
+                        StartRequest(contexts=request.contexts, dry_run=was_simulated),
+                    )
+            except HTTPException as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"camera settings saved, but reconnect failed: {exc.detail}",
+                ) from exc
             await broadcast({"type": "status", "payload": public_state()})
-            return CommandResponse(ok=True, message=f"camera updated: {camera_id}")
+            suffix = " and reconnected" if was_streaming or was_running else ""
+            return CommandResponse(ok=True, message=f"camera updated{suffix}: {camera_id}")
     raise HTTPException(status_code=404, detail=f"camera not found: {camera_id}")
 
 
@@ -1043,17 +1368,27 @@ async def start_camera_recording(camera_id: str) -> CommandResponse:
     if runtime.recording:
         raise HTTPException(status_code=409, detail="recording is already running")
 
-    command = list(camera.get("record_command") or [])
-    if command:
-        try:
-            runtime.record_process = await asyncio.create_subprocess_exec(*command, cwd=str(ROOT_DIR))
-        except Exception as exc:
-            runtime.last_error = str(exc)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    output_dir = manual_recording_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    output_path = output_dir / f"{timestamp}-{_safe_filename(camera_id)}-{uuid.uuid4().hex[:8]}.mp4"
+    try:
+        command = build_manual_record_command(camera, output_path)
+        runtime.record_process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(ROOT_DIR),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except Exception as exc:
+        runtime.last_error = str(exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     runtime.recording = True
+    runtime.record_output_path = str(output_path)
+    runtime.last_error = None
     await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message=f"{camera_id} recording started")
+    return CommandResponse(ok=True, message=f"{camera_id} 开始录像：{output_path}")
 
 
 @app.post("/api/cameras/{camera_id}/recording/stop", response_model=CommandResponse)
@@ -1064,8 +1399,9 @@ async def stop_camera_recording(camera_id: str) -> CommandResponse:
     await stop_process(runtime.record_process)
     runtime.record_process = None
     runtime.recording = False
+    output_path = runtime.record_output_path
     await broadcast({"type": "status", "payload": public_state()})
-    return CommandResponse(ok=True, message=f"{camera_id} recording stopped")
+    return CommandResponse(ok=True, message=f"{camera_id} 录像已保存：{output_path or '未知路径'}")
 
 
 @app.post("/api/pipeline/start", response_model=CommandResponse)
@@ -1119,6 +1455,7 @@ async def detections_socket(websocket: WebSocket) -> None:
 
 @app.on_event("startup")
 async def autostart_configured_cameras() -> None:
+    reconcile_interrupted_recordings()
     cameras = camera_configs()
     stream_started = False
     for camera_id, camera in cameras.items():

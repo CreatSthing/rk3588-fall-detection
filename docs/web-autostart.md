@@ -24,7 +24,7 @@ sudo ./deploy/install_web_service.sh
 
 1. 创建/复用 `rkcamera` 系统用户。
 2. 创建 `/etc/rk3588-camera/web.env`。
-3. 创建 `/etc/rk3588-camera/web.json`，用于配置真实检测命令。
+3. 创建 `/var/lib/rk3588-camera/web.json`，用于保存可在 Web 页面修改的摄像头配置。
 4. 创建 `/opt/rk3588-camera/current/.venv` 并安装 FastAPI/Uvicorn。
 5. 安装并启用 `rk3588-web.service`。
 6. 立即启动 Web 后端。
@@ -40,7 +40,7 @@ http://板子IP:8000
 ```bash
 WEB_HOST=0.0.0.0
 WEB_PORT=8000
-RK3588_WEB_CONFIG=/etc/rk3588-camera/web.json
+RK3588_WEB_CONFIG=/var/lib/rk3588-camera/web.json
 ```
 
 ## 常用命令
@@ -86,7 +86,7 @@ sudo systemctl enable --now rk3588-web
 后端会读取：
 
 ```text
-/etc/rk3588-camera/web.json
+/var/lib/rk3588-camera/web.json
 ```
 
 默认内容来自：

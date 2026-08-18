@@ -29,6 +29,7 @@ class AlarmEventRepositoryTests(unittest.TestCase):
 
         recorded = self.repository.set_recording("fall-1", "ready", "/tmp/fall-1.mp4")
         self.assertTrue(recorded["video_ready"])
+        self.assertEqual([], self.repository.incomplete_recordings())
         acknowledged = self.repository.acknowledge("fall-1")
         self.assertTrue(acknowledged["acknowledged"])
 
@@ -43,6 +44,23 @@ class AlarmEventRepositoryTests(unittest.TestCase):
         self.assertEqual("recovered", recovered["state"])
         self.assertEqual(1010.0, recovered["ended_at"])
         self.assertEqual(1, len(self.repository.list()))
+
+        deleted = self.repository.delete("fall-1")
+        self.assertEqual("fall-1", deleted["id"])
+        self.assertIsNone(self.repository.get("fall-1"))
+        self.assertEqual([], self.repository.list())
+
+    def test_lists_incomplete_recordings_for_startup_recovery(self):
+        self.repository.upsert({
+            "id": "fall-pending",
+            "camera_id": "cam1",
+            "event_type": "fall",
+            "state": "confirmed",
+            "confidence": 0.8,
+            "timestamp": 1000.0,
+        })
+        incomplete = self.repository.incomplete_recordings()
+        self.assertEqual(["fall-pending"], [event["id"] for event in incomplete])
 
 
 if __name__ == "__main__":

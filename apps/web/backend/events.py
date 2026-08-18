@@ -153,6 +153,16 @@ class EventRepository:
             raise KeyError(event_id)
         return result
 
+    def delete(self, event_id: str) -> Dict[str, Any]:
+        with self._lock, closing(self._connect()) as connection, connection:
+            row = connection.execute("SELECT * FROM alarm_events WHERE id = ?", (event_id,)).fetchone()
+            if row is None:
+                raise KeyError(event_id)
+            connection.execute("DELETE FROM alarm_events WHERE id = ?", (event_id,))
+        result = self._row(row)
+        assert result is not None
+        return result
+
     def list(self, limit: int = 100, camera_id: Optional[str] = None) -> List[Dict[str, Any]]:
         query = "SELECT * FROM alarm_events"
         params: List[Any] = []
@@ -163,4 +173,11 @@ class EventRepository:
         params.append(max(1, min(limit, 500)))
         with closing(self._connect()) as connection:
             rows = connection.execute(query, params).fetchall()
+        return [self._row(row) for row in rows if row is not None]
+
+    def incomplete_recordings(self) -> List[Dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT * FROM alarm_events WHERE recording_status IN ('pending', 'recording')"
+            ).fetchall()
         return [self._row(row) for row in rows if row is not None]

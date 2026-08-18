@@ -1,19 +1,46 @@
 {
-  "model": "yolov8n-pose-fp16.rknn",
+  "model": "yolov8n-pose-int8-calibrated-20260818.rknn",
   "target": "rk3588",
   "input_size": [640, 640],
   "rknn_toolkit2": "2.3.2",
   "rknn_runtime": "2.3.2",
-  "rknn_model_sha256": "3d63f96d834d0d73c3e7e32bac7ca084d820548a9f394bf62ae1c9f526793c17",
+  "rknn_model_sha256": "df98f844b19c7b75b8ffc376294678ed6bf0e510a50582da0574ec8ee1cde622",
   "onnx_sha256": "308495ebe4416b40adf376485252a7b8ba7933a169368b31e74e0f977ded8663",
   "runtime_sha256": "d31fc19c85b85f6091b2bd0f6af9d962d5264a4e410bfb536402ec92bac738e8",
   "rknnlite_wheel_sha256": "4309821b592df85b1fd2a7ff8b863e371ab25d60fca2b86defb8c4542db9d3e9",
-  "precision": "fp16",
-  "reason": "The original INT8 calibration set contained no representative people and saturated positive object logits at 0.0 (sigmoid 0.5). FP16 restores meaningful confidence scores.",
-  "retained_int8": {
-    "model": "yolov8n-pose-int8.rknn",
-    "sha256": "52fb616049eeaea318242ee7972a65d3da7e44cd3d0e9ab8142678dd28523cc3",
-    "status": "rollback-only; do not deploy until recalibrated with representative human poses"
+  "precision": "hybrid-int8",
+  "reason": "Recalibrated with representative local fall/recovery poses plus official COCO person, pose, and negative images. Independent board validation removed the fixed 0.500 confidence failure and matched FP16 accuracy while reducing NPU latency.",
+  "calibration": {
+    "images": 126,
+    "counts": {
+      "local_person": 32,
+      "local_negative": 10,
+      "coco128_person": 61,
+      "coco128_negative": 15,
+      "coco8_pose": 8
+    },
+    "dataset_sha256": "ee3a7c7a1744bcabd1ce339c834225f491c02cf34e3c8202233546ede3ea6271",
+    "manifest_sha256": "b81077e913fd6229fb191396d3651ad8a797d56f4a99ca5155e598be74a25f05"
+  },
+  "validation": {
+    "independent_images": 30,
+    "fp_detected": 30,
+    "int8_detected": 30,
+    "int8_score_range": [0.731358, 0.90055],
+    "top_score_mae": 0.009475,
+    "keypoint_coordinate_mae_px": 3.0087,
+    "fall_video_frames": 272,
+    "fp16_fps": 11.13,
+    "int8_fps": 20.65,
+    "fp16_npu_ms": 72.1,
+    "int8_npu_ms": 32.682,
+    "fp16_alarm_confidence": 0.952,
+    "int8_alarm_confidence": 0.961
+  },
+  "retained_fp16": {
+    "model": "yolov8n-pose-fp16.rknn",
+    "sha256": "3d63f96d834d0d73c3e7e32bac7ca084d820548a9f394bf62ae1c9f526793c17",
+    "status": "rollback model"
   },
   "previous_int8_calibration": {
     "images": 40,

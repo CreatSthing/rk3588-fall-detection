@@ -12,6 +12,7 @@ Group=rkcamera
 EnvironmentFile=/etc/rk3588-camera/web.env
 WorkingDirectory=/opt/rk3588-camera/current
 ExecStartPre=/usr/bin/test -x /opt/rk3588-camera/current/.venv/bin/python
+ExecStartPre=+/bin/sh -c 'if [ -d /sys/kernel/debug ]; then chmod 0711 /sys/kernel/debug; fi'
 ExecStart=/opt/rk3588-camera/current/deploy/run_web.sh
 Restart=on-failure
 RestartSec=3

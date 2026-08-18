@@ -1,160 +1,145 @@
-# RK3588 Fall Detection
+# RK3588 智能跌倒检测
 
-面向 Rockchip RK3588 的实时跌倒检测工程。系统使用 YOLOv8n-Pose RKNN 获取人体关键点，通过轻量跟踪和时序状态机判断跌倒，并将告警实时推送到浏览器，同时保存跌倒前后的事件录像。仓库保留原 YOLOv5 流媒体流水线，作为 RK3588 解码、推理、编码和推流基础。
-
-## 核心功能
-
-- YOLOv8n-Pose RKNN 姿态推理
-- 原项目 7 类动作：站立、行走、坐姿、躺卧、起身、落座、跌倒
-- 浏览器在同一推理帧上实时绘制 17 个关键点骨架和人员框
-- 多人轻量跟踪与时序跌倒判断
-- WebSocket 实时告警、声音提示和告警确认
-- SQLite 告警记录与录像索引
-- 默认保存跌倒前 5 秒、后 10 秒事件录像
-- FFmpeg RTSP 兜底录像
-
-## 原有媒体能力
-
-- 单张图片 YOLOv5 推理
-- 本地视频目标检测
-- 多线程推理线程池
-- 视频流解码、推理和编码
-- 基于 ZLMediaKit 的流媒体处理
-- 支持 RKNN 量化与非量化模型
-- 可选的 PC 端 YOLOv5 ONNX 流程测试
-
-部署、接口和现场标定见 [`docs/fall-detection.md`](docs/fall-detection.md)。
-2026-08-17 的 RK3588 实机结果、故障原因和回滚步骤见 [`docs/rk3588-fall-deployment-report-20260817.md`](docs/rk3588-fall-deployment-report-20260817.md)。
-本次骨架、7类动作和真实离线跌倒回放记录见 [`docs/fall-pose-offline-validation-20260817.md`](docs/fall-pose-offline-validation-20260817.md)。
-
-## 目录结构
+基于 YOLOv8n-Pose 和 RK3588 NPU 的实时跌倒检测系统。系统从 RTSP 摄像头提取人体关键点，通过人员跟踪和时序规则判断跌倒，并提供 Web 预览、告警、录像及设备监控。
 
 ```text
-.
-├── apps/
-│   ├── image_demo/       # 单图检测入口
-│   ├── video_demo/       # 本地视频检测入口
-│   ├── thread_pool_demo/ # 多线程检测入口
-│   ├── stream_demo/      # 原始流处理入口
-│   ├── stream_pipeline/  # Pipeline 化实时流处理入口
-│   ├── pc_yolov5/        # PC 端 OpenCV DNN 测试入口
-│   ├── fall_detection/   # 姿态推理、跟踪、跌倒判断与事件录像
-│   └── web/              # 告警后端与浏览器前端
-├── src/
-│   ├── engine/          # 推理引擎抽象和 RKNN 实现
-│   ├── process/         # YOLOv5 前处理和后处理
-│   ├── yolov5/          # YOLOv5 模型封装和线程池
-│   ├── media/           # FFmpeg、MPP、ZLMediaKit 媒体处理
-│   ├── pipeline/        # 实时视频分析流程编排
-│   ├── draw/            # 检测框绘制
-│   ├── pc/              # PC 端 OpenCV DNN 后端实现
-│   ├── types/           # 通用数据结构和错误码
-│   └── utils/           # 日志和辅助函数
-├── assets/
-│   ├── labels/          # 类别标签
-│   ├── media/           # 测试素材
-│   └── weights/         # RKNN 模型
-├── docs/                # 工程记录和结构说明
-├── librknn_api/include/ # RKNN Runtime 头文件
-├── 3rdparty/rga/        # RGA 头文件
-├── mpp_libs/            # MPP/ZLMediaKit 库放置目录
-└── CMakeLists.txt       # CMake 构建配置
+RTSP 摄像头 → FFmpeg 解码 → YOLOv8n-Pose RKNN
+             → 人员跟踪/跌倒判断 → WebSocket、SQLite、MP4
 ```
 
-更完整的结构优化建议见 [`docs/project-structure.md`](docs/project-structure.md)。
+## 功能
 
-## 环境要求
+- YOLOv8n-Pose 17点姿态推理，支持多人跟踪
+- 识别站立、行走、坐姿、躺卧、起身、落座和跌倒
+- 浏览器管理多路 RTSP 摄像头，修改配置后自动重连
+- 同帧显示视频、人员框和骨架
+- 可调告警置信度，支持声音通知、确认和删除
+- 自动保存跌倒前后录像，支持手动录像、播放和下载
+- 显示 CPU、内存、温度、NPU 三核和 RGA 负载
 
-- Rockchip RK3588，64 位 ARM Linux
-- CMake 3.11 或更高版本
-- 支持 C++14 的编译器
-- RKNN Runtime
-- Rockchip MPP 与 RGA
-- OpenCV
-- FFmpeg（`avformat`、`avcodec`、`avutil`）
-- ZLMediaKit C API
+> 动作状态由关键点几何和短时运动规则判断，不是独立的动作分类模型。正式使用前需要按机位标定阈值。
 
-## 第三方依赖
+## 实机结果
 
-为控制仓库体积，OpenCV SDK、平台预编译动态库以及大型视频样例未纳入 Git。构建前请根据目标系统准备依赖，并将 RKNN、MPP、RGA 和 ZLMediaKit 库放到 `CMakeLists.txt` 所使用的位置，或修改其中的搜索路径。
+在 Orange Pi 5 Ultra、640×360 @ 20 FPS 摄像头上，当前 INT8 模型实时处理约 19 FPS。272帧跌倒视频中检出271帧并触发一次告警；INT8 NPU 耗时约32.7 ms，FP16约72.1 ms。完整结果见 [`deploy/fall-model-manifest.json`](deploy/fall-model-manifest.json)。
 
-## 构建
+<video src="media/README/fall-alarm-demo.mp4" controls></video>
+
+[查看跌倒报警演示](media/README/fall-alarm-demo.mp4)
+
+![Web 控制台](media/README/image-20260818002558850.png)
+
+## 项目结构
+
+```text
+apps/fall_detection/   姿态推理、跟踪、跌倒规则和事件录像
+apps/web/              FastAPI 后端与 Vue 前端
+assets/                模型、校准集和本地测试素材
+deploy/                安装、systemd、转推和验收脚本
+docs/                  配置、标定和验证文档
+tests/                 Python 单元测试
+tools/                 模型转换、校准和诊断工具
+```
+
+模型、校准图片和大体积测试视频默认不提交 Git。
+
+## 复现
+
+### 1. 准备开发板
+
+要求：RK3588/RK3588S 64位 Linux、Python 3.8+、FFmpeg、OpenCV、RKNN Runtime 2.3.2，以及匹配 Python 版本的 `rknn-toolkit-lite2` 2.3.2 wheel。
 
 ```bash
-mkdir -p build
-cd build
-cmake ..
-cmake --build . -j$(nproc)
+sudo apt update
+sudo apt install -y git ffmpeg python3-venv python3-opencv python3-numpy
+
+sudo mkdir -p /opt/rk3588-camera
+sudo git clone https://github.com/CreatSthing/rk3588-fall-detection.git \
+  /opt/rk3588-camera/current
+sudo chown -R "$(id -un):$(id -gn)" /opt/rk3588-camera/current
+cd /opt/rk3588-camera/current
 ```
 
-可执行目标包括：
+RKNN Runtime 和 RKNNLite 可从 [RKNN-Toolkit2 v2.3.2](https://github.com/airockchip/rknn-toolkit2/releases/tag/v2.3.2) 获取。
 
-- `yolov5_img`
-- `yolov5_video`
-- `yolov5_thread_pool`
-- `yolov5_stream`
-- `yolov5_stream_pool`
-- `rknn_benchmark`
+### 2. 准备模型
 
-## RKNN 模型测速
+将以下文件放入 `assets/weights/`：
 
-`rknn_benchmark` 只测 RKNN 输入、NPU 推理和输出获取，不包含图片解码、YOLO 后处理或画框。默认先预热 10 次，再连续测量 100 次，并输出平均延迟、P50、P95 和等效 FPS：
+```text
+yolov8n-pose-int8-calibrated-20260818.rknn
+```
+
+SHA-256：
+
+```text
+df98f844b19c7b75b8ffc376294678ed6bf0e510a50582da0574ec8ee1cde622
+```
+
+将匹配板端 Python 的 RKNNLite wheel 放入 `vendor/`。如需从 ONNX 重新量化：
 
 ```bash
-rknn_benchmark model.rknn
+python3 tools/convert_yolov8_pose_onnx_to_rknn.py \
+  yolov8n-pose.onnx \
+  assets/calibration/pose-int8-20260818/dataset.txt \
+  assets/weights/yolov8n-pose-int8-calibrated-20260818.rknn
 ```
 
-也可指定测量次数和预热次数：
+当前模型使用126张本地姿态、COCO人体及负样本混合校准图；生成方法见 `tools/prepare_pose_calibration_dataset.py`。
+
+### 3. 安装服务
 
 ```bash
-rknn_benchmark model.rknn 200 20
+sudo ./deploy/install_web_service.sh /opt/rk3588-camera/current
 ```
 
-## PC 端流程测试
-
-`pc_yolov5` 用于在没有 RK3588 开发板时验证“读取输入、YOLO 推理、后处理、画框、保存结果”的基本流程。它使用 OpenCV DNN 加载常见的 YOLOv5 ONNX 模型，不依赖 RKNN、MPP、RGA 或 ZLMediaKit。
-
-Windows PowerShell 构建：
-
-```powershell
-cmake -S . -B build-pc -DBUILD_RK3588_TARGETS=OFF -DBUILD_PC_YOLO_DEMO=ON -DOpenCV_DIR=C:/path/to/opencv/cmake
-cmake --build build-pc --config Release
-```
-
-Linux/macOS Shell 构建：
+编辑 `/var/lib/rk3588-camera/web.json` 中的 RTSP 地址，或打开 Web 控制台后在摄像头管理中修改并选择“保存并重新连接”。配置模板位于 [`apps/web/backend/config.example.json`](apps/web/backend/config.example.json)。
 
 ```bash
-cmake -S . -B build-pc \
-  -DBUILD_RK3588_TARGETS=OFF \
-  -DBUILD_PC_YOLO_DEMO=ON \
-  -DOpenCV_DIR=/path/to/opencv/cmake
-cmake --build build-pc --config Release
+sudo systemctl restart rk3588-web
+systemctl status rk3588-web --no-pager
+journalctl -u rk3588-web -f
 ```
 
-测试图片：
+浏览器访问：
+
+```text
+http://开发板IP:8000
+```
+
+### 4. 验证
+
+验证摄像头和 NPU 推理：
 
 ```bash
-pc_yolov5 yolov5s.onnx input.jpg result.jpg assets/labels/coco_80_labels_list.txt
+./deploy/verify_fall_deployment.sh \
+  /opt/rk3588-camera/current \
+  'rtsp://user:password@camera-ip:554/stream2' 30
 ```
 
-测试视频：
+运行不依赖 NPU 的测试：
 
 ```bash
-pc_yolov5 yolov5s.onnx input.mp4 result.mp4 assets/labels/coco_80_labels_list.txt
+python -m unittest discover -s tests -v
 ```
 
-测试 PC 摄像头，输入 `0` 表示第一个摄像头，按 `Esc` 停止：
+## 数据位置
 
-```bash
-pc_yolov5 yolov5s.onnx 0 camera_result.mp4 assets/labels/coco_80_labels_list.txt
-```
+| 内容 | 板端位置 |
+| --- | --- |
+| 运行配置 | `/var/lib/rk3588-camera/web.json` |
+| 告警数据库与事件录像 | `/var/lib/rk3588-camera/events` |
+| 手动录像 | `/var/lib/rk3588-camera/recordings` |
+| 服务日志 | `journalctl -u rk3588-web -f` |
 
-当前 PC 后端只支持输出形状为 `[1, N, 5 + 类别数]` 的常见 YOLOv5 ONNX 模型。ONNX 模型不提交到仓库，可由原始 YOLOv5 工程导出后放入本地测试目录。
+## 文档
 
-## 模型与测试素材
+- [跌倒规则、告警和现场标定](docs/fall-detection.md)
+- [Web 控制台配置与 API](docs/web-console.md)
+- [RK3588 部署与故障排查](docs/rk3588-fall-deployment-report-20260817.md)
 
-`assets/weights/` 中包含 RKNN 模型。`assets/media/` 中保留了小型图片样例；大型视频文件因 GitHub 文件大小限制未提交，可自行准备视频或流地址进行测试。
+## 注意
 
-## 注意事项
-
-本工程依赖 RK3588 平台相关运行库，建议直接在开发板上构建，或使用正确配置的 aarch64 交叉编译环境。
+- 不要把包含账号密码的 RTSP 地址提交到 Git。
+- 上线前应测试跌倒、快速坐下、弯腰、下蹲、躺卧、遮挡、夜间和多人场景。
+- 本项目是视觉辅助告警系统，不能替代人工看护或生命安全系统。

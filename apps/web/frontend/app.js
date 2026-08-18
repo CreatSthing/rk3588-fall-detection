@@ -30,7 +30,12 @@ createApp({
     const message = ref("");
     const logs = ref([]);
     const alarms = ref([]);
-    const alarmSoundEnabled = ref(false);
+    const alarmSoundEnabled = ref(localStorage.getItem("alarmSoundEnabled") === "true");
+    const alarmSettings = reactive({
+      confidenceThresholdPercent: 50,
+      recordingEnabled: true,
+      recordingDirectory: "",
+    });
     const activeTab = ref("cameras");
     const monitorSize = ref(localStorage.getItem("monitorSize") || "medium");
     const monitorSizeOptions = [
@@ -54,6 +59,7 @@ createApp({
       temp: [],
     });
     const cameraFormCache = {};
+    const cameraEditCache = {};
     const cameraDetectionCache = {};
     const cameraPreviewCache = {};
     const cameraPreviewPending = {};
@@ -79,6 +85,20 @@ createApp({
         });
       }
       return cameraFormCache[cameraId];
+    }
+
+    function editFormForCamera(camera) {
+      if (!cameraEditCache[camera.id]) {
+        cameraEditCache[camera.id] = reactive({
+          name: camera.name || camera.id,
+          source_url: camera.source_url || "",
+          width: Number(camera.width) || 640,
+          height: Number(camera.height) || 360,
+          contexts: Number(camera.configured_contexts) || 1,
+          decoder: camera.decoder || "software",
+        });
+      }
+      return cameraEditCache[camera.id];
     }
 
     function appendLog(text, cameraId = "") {
@@ -108,6 +128,7 @@ createApp({
           last_result: hasSynchronizedPreview ? cameraDetectionCache[camera.id] : null,
           preview_url: hasSynchronizedPreview ? cameraPreviewCache[camera.id] : "",
           form: formForCamera(camera.id),
+          edit: editFormForCamera(camera),
           player_url_abs: normalizePlayerUrl(camera.player_url),
           rtsp_url_abs: camera.rtsp_url || `rtsp://${location.hostname}:8554/live/${camera.id}`,
           hls_url_abs: camera.hls_url && camera.hls_url.startsWith("http")
@@ -174,6 +195,7 @@ createApp({
     }
 
     function notifyAlarm(event) {
+      if (!alarmSoundEnabled.value) return;
       playAlarmSound();
       if (window.Notification && Notification.permission === "granted") {
         new Notification("检测到人员跌倒", {
@@ -182,11 +204,16 @@ createApp({
       }
     }
 
-    async function enableAlarmNotifications() {
-      alarmSoundEnabled.value = true;
-      if (window.Notification && Notification.permission === "default") {
-        await Notification.requestPermission();
+    async function toggleAlarmNotifications() {
+      if (alarmSoundEnabled.value) {
+        alarmSoundEnabled.value = false;
+        localStorage.setItem("alarmSoundEnabled", "false");
+        message.value = "声音与系统通知已关闭";
+        return;
       }
+      alarmSoundEnabled.value = true;
+      localStorage.setItem("alarmSoundEnabled", "true");
+      if (window.Notification && Notification.permission === "default") await Notification.requestPermission();
       message.value = "前端告警声音与系统通知已启用";
     }
 
@@ -218,14 +245,16 @@ createApp({
           appendLog("检测到人员跌倒，已自动开始事件录像", data.camera_id);
         } else if (data.type === "alarm_update") {
           upsertAlarm(data.payload);
+        } else if (data.type === "alarm_deleted") {
+          alarms.value = alarms.value.filter((item) => item.id !== data.payload?.id);
         }
       };
     }
 
-    async function callApi(path, body = {}) {
+    async function callApi(path, body = {}, method = "POST") {
       message.value = "";
       const response = await fetch(path, {
-        method: "POST",
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -263,6 +292,31 @@ createApp({
       }
     }
 
+    async function refreshAlarmSettings() {
+      try {
+        const response = await fetch("/api/alarm-settings");
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "读取告警设置失败");
+        alarmSettings.confidenceThresholdPercent = Math.round(Number(payload.confidence_threshold || 0) * 100);
+        alarmSettings.recordingEnabled = Boolean(payload.recording_enabled);
+        alarmSettings.recordingDirectory = payload.recording_directory || "";
+      } catch (err) {
+        appendLog(`读取告警设置失败：${err.message}`);
+      }
+    }
+
+    async function saveAlarmSettings() {
+      const percent = Math.max(0, Math.min(100, Number(alarmSettings.confidenceThresholdPercent) || 0));
+      alarmSettings.confidenceThresholdPercent = percent;
+      try {
+        await callApi("/api/alarm-settings", { confidence_threshold: percent / 100 }, "PUT");
+        await refreshAlarmSettings();
+      } catch (err) {
+        message.value = err.message;
+        appendLog(`保存告警设置失败：${err.message}`);
+      }
+    }
+
     async function acknowledgeAlarm(event) {
       try {
         const response = await fetch(`/api/events/${event.id}/acknowledge`, { method: "POST" });
@@ -274,6 +328,21 @@ createApp({
       }
     }
 
+    async function deleteAlarm(event) {
+      if (!confirm("确定删除这条告警记录及其录像文件？删除后无法恢复。")) return;
+      try {
+        const response = await fetch(`/api/events/${event.id}`, { method: "DELETE" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "删除失败");
+        alarms.value = alarms.value.filter((item) => item.id !== event.id);
+        message.value = payload.message || "告警已删除";
+        appendLog(message.value, event.camera_id);
+      } catch (err) {
+        message.value = err.message;
+        appendLog(`删除告警失败：${err.message}`, event.camera_id);
+      }
+    }
+
     function eventTime(value) {
       if (!value) return "--";
       return new Date(Number(value) * 1000).toLocaleString();
@@ -281,6 +350,18 @@ createApp({
 
     function eventVideoUrl(event) {
       return event.video_ready ? `/api/events/${event.id}/video` : "";
+    }
+
+    function recordingTime(value) {
+      if (!value) return "录像";
+      return new Date(Number(value) * 1000).toLocaleString();
+    }
+
+    function formatBytes(value) {
+      const bytes = Number(value || 0);
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     }
 
     function pushMetricHistory(payload) {
@@ -545,6 +626,24 @@ createApp({
       };
     }
 
+    async function saveCamera(camera) {
+      const edit = camera.edit || editFormForCamera(camera);
+      try {
+        await callApi(`/api/cameras/${camera.id}`, {
+          id: camera.id,
+          name: edit.name.trim(),
+          source_url: edit.source_url.trim(),
+          width: Number(edit.width) || 640,
+          height: Number(edit.height) || 360,
+          contexts: Number(edit.contexts) || 1,
+          decoder: edit.decoder || "software",
+        }, "PUT");
+      } catch (err) {
+        message.value = err.message;
+        appendLog(`修改摄像头失败：${err.message}`, camera.id);
+      }
+    }
+
     function poseViewBox(camera) {
       const width = Number(camera.last_result?.width || camera.width) || 640;
       const height = Number(camera.last_result?.height || camera.height) || 360;
@@ -605,6 +704,7 @@ createApp({
       refreshStatus();
       refreshSystemMetrics();
       refreshEvents();
+      refreshAlarmSettings();
       connectWs();
       setInterval(refreshStatus, 3000);
       setInterval(refreshSystemMetrics, 2000);
@@ -626,6 +726,7 @@ createApp({
       logs,
       alarms,
       alarmSoundEnabled,
+      alarmSettings,
       activeAlarm,
       unacknowledgedAlarms,
       totalRunning,
@@ -655,6 +756,7 @@ createApp({
       startStream,
       stopStream,
       addCamera,
+      saveCamera,
       removeCamera,
       boxStyle,
       poseViewBox,
@@ -663,10 +765,14 @@ createApp({
       postureLabel,
       isFallDetection,
       detectionConfidence,
-      enableAlarmNotifications,
+      toggleAlarmNotifications,
+      saveAlarmSettings,
       acknowledgeAlarm,
+      deleteAlarm,
       eventTime,
       eventVideoUrl,
+      recordingTime,
+      formatBytes,
     };
   },
 }).mount("#app");

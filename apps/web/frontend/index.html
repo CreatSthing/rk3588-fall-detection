@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RK3588 智能摄像头控制台</title>
     <script src="/static/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=pose-sync-20260817-5" />
+    <link rel="stylesheet" href="/static/style.css?v=alarm-controls-20260818-1" />
   </head>
   <body>
     <div id="app" class="page">
@@ -49,10 +49,19 @@
               <h2>跌倒告警记录</h2>
               <p>告警会实时保存；事件录像完成后可直接查看或下载。</p>
             </div>
-            <button @click="enableAlarmNotifications">
-              {{ alarmSoundEnabled ? '声音与通知已启用' : '启用声音与系统通知' }}
-            </button>
+            <div class="alarm-toolbar">
+              <label>
+                报警置信度（%）
+                <input v-model.number="alarmSettings.confidenceThresholdPercent" type="number" min="0" max="100" step="1" />
+              </label>
+              <button class="primary" @click="saveAlarmSettings">保存阈值</button>
+              <button @click="toggleAlarmNotifications">
+                {{ alarmSoundEnabled ? '关闭声音与系统通知' : '开启声音与系统通知' }}
+              </button>
+            </div>
           </div>
+          <p class="recording-location">告警录像保存位置：<code>{{ alarmSettings.recordingDirectory || '读取中…' }}</code></p>
+          <p class="hint">只有跌倒置信度严格高于该阈值时才会报警和录像；保存阈值会自动重启正在运行的检测。</p>
           <div v-if="!alarms.length" class="alarm-empty">暂无跌倒告警</div>
           <div v-else class="alarm-list">
             <article v-for="event in alarms" :key="event.id" class="alarm-row" :class="{ acknowledged: event.acknowledged }">
@@ -70,6 +79,7 @@
                 <a v-if="eventVideoUrl(event)" :href="eventVideoUrl(event)" target="_blank">查看录像</a>
                 <span v-else class="record-wait">{{ event.recording_status === 'failed' ? '录像失败' : '录像生成中' }}</span>
                 <button v-if="!event.acknowledged" class="primary" @click="acknowledgeAlarm(event)">确认收到</button>
+                <button class="danger" :disabled="['pending', 'recording'].includes(event.recording_status)" @click="deleteAlarm(event)">删除</button>
               </div>
             </article>
           </div>
@@ -115,6 +125,7 @@
                 <span v-for="core in system.npu.cores" :key="core.name">
                   {{ core.name }} {{ busyText(core.load_percent) }}
                 </span>
+                <span v-if="!system.npu.cores.length">每核采样不可用</span>
               </div>
             </div>
             <div class="donut-card">
@@ -129,6 +140,7 @@
                 <span v-for="item in system.rga.debug.schedulers" :key="item.name">
                   {{ item.name }} {{ busyText(item.load_percent) }}
                 </span>
+                <span v-if="!system.rga.debug.schedulers.length">Scheduler 采样不可用</span>
               </div>
             </div>
           </div>
@@ -212,6 +224,7 @@
                 <div class="core-bar"><i :style="barStyle(core.load_percent)"></i></div>
                 <b>{{ busyText(core.load_percent) }}</b>
               </div>
+              <p v-if="!system.npu.cores.length" class="hint">未读取到 NPU 每核负载。</p>
             </div>
             <div class="accelerator-group">
               <h3>RGA Scheduler 负载</h3>
@@ -220,6 +233,7 @@
                 <div class="core-bar"><i :style="barStyle(item.load_percent)"></i></div>
                 <b>{{ busyText(item.load_percent) }}</b>
               </div>
+              <p v-if="!system.rga.debug.schedulers.length" class="hint">未读取到 RGA Scheduler 负载。</p>
             </div>
           </div>
 
@@ -290,6 +304,14 @@
                   {{ camera.width }}×{{ camera.height }} /
                   检测 FPS {{ camera.fps || 0 }}
                 </p>
+                <p v-if="camera.last_result?.timings_ms" class="pipeline-timing">
+                  每帧 {{ camera.last_result.timings_ms.frame_total }}ms ·
+                  取帧 {{ camera.last_result.timings_ms.source_read }} ·
+                  JPEG {{ camera.last_result.timings_ms.recording_buffer }} ·
+                  预处理 {{ camera.last_result.timings_ms.preprocess }} ·
+                  NPU {{ camera.last_result.timings_ms.npu }} ·
+                  后处理 {{ camera.last_result.timings_ms.postprocess }}
+                </p>
               </div>
               <div class="camera-state">
                 <span :class="{ ok: camera.streaming }">{{ camera.streaming ? '推流中' : '未推流' }}</span>
@@ -356,8 +378,35 @@
                 <button :disabled="!camera.recording" @click="stopRecording(camera)">停录像</button>
               </div>
 
+              <div class="manual-recordings">
+                <small>手动录像目录：<code>{{ camera.recording_directory }}</code></small>
+                <small v-if="camera.recording && camera.recording_path">正在写入：{{ camera.recording_path }}</small>
+                <span v-if="!camera.manual_recordings?.length">暂无手动录像</span>
+                <a
+                  v-for="recording in camera.manual_recordings"
+                  :key="recording.filename"
+                  :href="recording.url"
+                  target="_blank"
+                >{{ recordingTime(recording.modified_at) }}（{{ formatBytes(recording.size_bytes) }}）</a>
+              </div>
+
               <details class="camera-debug">
                 <summary>调试 / 输入源 / 检测明细</summary>
+                <div class="camera-edit-grid">
+                  <label class="camera-edit-name">名称<input v-model="camera.edit.name" /></label>
+                  <label class="camera-edit-source">摄像头 RTSP 地址<input v-model="camera.edit.source_url" placeholder="rtsp://user:pass@ip:554/stream2" /></label>
+                  <label>宽<input v-model.number="camera.edit.width" type="number" min="1" /></label>
+                  <label>高<input v-model.number="camera.edit.height" type="number" min="1" /></label>
+                  <label>Context<input v-model.number="camera.edit.contexts" type="number" min="1" max="20" /></label>
+                  <label>解码方式
+                    <select v-model="camera.edit.decoder">
+                      <option value="software">software</option>
+                      <option value="auto">auto</option>
+                    </select>
+                  </label>
+                  <button class="primary camera-edit-save" @click="saveCamera(camera)">保存并重新连接</button>
+                </div>
+                <p class="hint">保存时会保留跌倒检测和自动启动设置；若当前正在推流/检测，会自动重连。</p>
                 <div class="camera-controls">
                   <input
                     v-model="camera.form.source"
@@ -448,6 +497,6 @@
         </section>
       </main>
     </div>
-    <script src="/static/app.js?v=pose-sync-20260817-5"></script>
+    <script src="/static/app.js?v=alarm-controls-20260818-1"></script>
   </body>
 </html>

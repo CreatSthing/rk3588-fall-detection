@@ -29,24 +29,24 @@
 
 使用 Rockchip RKNN Model Zoo 提供的优化版 `yolov8n-pose.onnx`，不要直接用 Ultralytics 原始导出的单输出 ONNX 替换，两者的输出格式不同。
 
-当前生产配置使用 FP16。初版 INT8 的40张量化图只有空场景、没有代表性人体姿态，使目标置信度正样本被截到原始 logit `0.0`，sigmoid 后全部为 `0.500`，会把手或物体边缘误判为人。没有合格人体量化集时不要使用该 INT8 文件。
+当前生产配置使用2026-08-18重新校准的混合 INT8。初版 INT8 的40张量化图只有空场景、没有代表性人体姿态，使目标置信度正样本被截到原始 logit `0.0`，sigmoid 后全部为 `0.500`。新校准集包含32张现场人体、10张现场负样本、61张 COCO128 人体、15张 COCO128 负样本和8张 COCO8-Pose，共126张并按哈希去重；FP16模型继续保留用于回滚。
 
 在 x86 Ubuntu 的 RKNN-Toolkit2 2.3.2 环境转换 FP16：
 
 ```bash
 python3 tools/convert_yolov8_pose_onnx_to_rknn.py \
   yolov8n-pose.onnx pose_dataset.txt \
-  assets/weights/yolov8n-pose-fp16.rknn --fp16
+  assets/weights/yolov8n-pose-int8-calibrated-20260818.rknn
 ```
 
-以后如需重新做 INT8，量化集必须覆盖站立、走动、坐下、躺卧、起身、落座、跌倒、弯腰、遮挡和空场景，并与独立验证集比较后才能替换。转换使用的 RKNN-Toolkit2、板端 `librknnrt.so` 和 `rknn-toolkit-lite2` 必须同版本；本次统一使用2.3.2，校验值见 `deploy/fall-model-manifest.json`。
+以后如需重新做 INT8，量化集必须覆盖站立、走动、坐下、躺卧、起身、落座、跌倒、弯腰、遮挡和空场景，并与独立验证集比较后才能替换。转换使用的 RKNN-Toolkit2、板端 `librknnrt.so` 和 `rknn-toolkit-lite2` 必须同版本；本次统一使用2.3.2，校验值和验证指标见 `deploy/fall-model-manifest.json`。本次独立30张验证图检测率为30/30，INT8无固定0.500分数；272帧跌倒视频与FP16均检测271帧并触发一次录像告警，INT8端到端20.65 FPS。
 
 ## 启动姿态检测程序
 
 ```bash
 cd /opt/rk3588-camera/current
 .venv/bin/python -m apps.fall_detection.main \
-  --model assets/weights/yolov8n-pose-fp16.rknn \
+  --model assets/weights/yolov8n-pose-int8-calibrated-20260818.rknn \
   --source rtsp://127.0.0.1:8554/live/cam1 \
   --camera-id cam1 \
   --event-dir /var/lib/rk3588-camera/events \

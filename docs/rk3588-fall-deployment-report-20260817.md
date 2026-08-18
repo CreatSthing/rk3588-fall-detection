@@ -63,14 +63,14 @@
 ### 4.1 Python依赖不存在
 
 - 表现：系统 Python 和原 Web 虚拟环境无法导入 `cv2`、`numpy`、`rknnlite`。
-- 原因：原项目主链路是 C++ YOLOv5，没有安装 Python 姿态推理依赖。
+- 原因：板端当时没有安装 Python 姿态推理依赖。
 - 解决：安装板卡发行版的 `python3-opencv`、`python3-numpy`，新发布目录使用独立虚拟环境，并安装与 Python 3.8/aarch64 匹配的 RKNNLite 2.3.2 wheel。
 
 ### 4.2 模型版本不兼容
 
 - 表现：`Invalid RKNN model version 6`。
 - 原因：模型由 Toolkit2 2.3.2生成，但板端原 Runtime 是1.5.3；RKNNLite还固定加载 `/usr/lib/librknnrt.so`，该文件更旧，只有1.4.0。仅设置 `LD_LIBRARY_PATH` 无法覆盖硬编码路径。
-- 解决：校验官方2.3.2运行库后备份旧文件，再安装到 `/usr/lib/librknnrt.so`。旧 YOLOv5 发布仍携带自己的1.5.3运行库，可回滚。
+- 解决：校验官方2.3.2运行库后备份旧文件，再安装到 `/usr/lib/librknnrt.so`；回滚时使用已备份的旧运行库。
 
 ### 4.3 RKNNLite输入维度不同
 

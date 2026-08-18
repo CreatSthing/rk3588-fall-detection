@@ -21,7 +21,7 @@
         "-m",
         "apps.fall_detection.main",
         "--model",
-        "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-fp16.rknn",
+        "/opt/rk3588-camera/current/assets/weights/yolov8n-pose-int8-calibrated-20260818.rknn",
         "--source",
         "{source}",
         "--camera-id",
@@ -33,6 +33,8 @@
     }
   ],
   "record_output_dir": "/var/lib/rk3588-camera/events",
+  "manual_record_output_dir": "/var/lib/rk3588-camera/recordings",
   "event_recording_enabled": true,
+  "fall_alarm_confidence_threshold": 0.5,
   "event_record_seconds": 20
 }

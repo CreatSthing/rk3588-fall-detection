@@ -118,6 +118,11 @@ h1 {
 .alarm-buttons { align-items: center; display: flex; gap: 10px; }
 .alarm-buttons a { background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(147, 197, 253, 0.4); border-radius: 12px; color: #bfdbfe; padding: 10px 14px; text-decoration: none; }
 .alarm-empty { color: #94a3b8; padding: 50px; text-align: center; }
+.alarm-toolbar { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.alarm-toolbar label { color: #9fb3c8; display: grid; font-size: 12px; gap: 5px; }
+.alarm-toolbar input { width: 120px; }
+.recording-location { color: #9fb3c8; margin-bottom: 8px; overflow-wrap: anywhere; }
+.recording-location code { color: #a7f3d0; }
 
 .grid {
   display: grid;
@@ -275,11 +280,26 @@ h1 {
   gap: 8px;
 }
 
+.manual-recordings {
+  align-items: flex-start;
+  color: #9fb3c8;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 5px;
+  min-width: 260px;
+}
+
+.manual-recordings code { color: #a7f3d0; overflow-wrap: anywhere; }
+.manual-recordings a { color: #93c5fd; }
+.pipeline-timing { overflow-wrap: anywhere; }
+
 .monitor-actions button {
   padding: 9px 12px;
 }
 
 .camera-debug {
+  grid-column: 1 / -1;
   min-width: 260px;
 }
 
@@ -291,9 +311,7 @@ h1 {
   list-style-position: inside;
 }
 
-.camera-debug[open] {
-  grid-column: span 2;
-}
+.camera-debug[open] { grid-column: 1 / -1; }
 
 .camera-debug[open] summary {
   margin-bottom: 10px;
@@ -965,6 +983,39 @@ button:disabled {
   position: absolute;
 }
 
+.camera-edit-grid {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 10px;
+}
+
+.camera-edit-grid label {
+  color: #9fb3c8;
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.camera-edit-grid button {
+  align-self: end;
+}
+
+.camera-edit-name {
+  grid-column: span 1;
+}
+
+.camera-edit-source {
+  grid-column: span 3;
+}
+
+.camera-edit-save {
+  grid-column: 1 / -1;
+  justify-self: start;
+  white-space: nowrap;
+}
+
 .detection-preview {
   display: block;
   object-fit: fill;
@@ -1081,6 +1132,7 @@ pre {
   .monitor-actions,
   .camera-tools,
   .camera-controls,
+  .camera-edit-grid,
   .add-camera-grid,
   .accelerator-grid {
     display: block;
@@ -1094,6 +1146,8 @@ pre {
 
   .camera-controls input,
   .camera-controls label,
+  .camera-edit-grid label,
+  .camera-edit-grid button,
   .add-camera-grid input,
   .add-camera-grid select,
   .add-camera-grid button {
@@ -1107,4 +1161,6 @@ pre {
 
   .alarm-row { display: block; }
   .alarm-state, .alarm-detail, .alarm-buttons { margin-bottom: 12px; }
+  .alarm-toolbar { display: block; margin-top: 12px; }
+  .alarm-toolbar input, .alarm-toolbar button { margin-bottom: 10px; width: 100%; }
 }
